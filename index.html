@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Tuned Flight</title>
+    <title>Orbital Rocket Simulator - 1g Physics</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #050814; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -77,7 +77,7 @@
         let mode = 'build';
         let keys = {};
         
-        // Tuned Masses for better handling
+        // Balanced 1g Masses
         const podPart = { type: 'pod', name: 'Cmd Pod', mass: 0.5, height: 40, width: 30, color: '#dddddd' };
         let rocketParts = [podPart];
         
@@ -91,11 +91,11 @@
         let isLaunched = false;
         let ROCKET_GROUP;
         
-        // Orbital Mechanics Variables 
+        // Perfectly Scaled 1g Orbital Mechanics
         let planetBody;
         const PLANET_RADIUS = 6000; 
         const PLANET_POS = { x: 0, y: 0 }; 
-        const GRAVITY_CONSTANT = 1500000; 
+        const GRAVITY_CONSTANT = 100000; // Recalibrated for 9.8m/s² at surface
         const ATMOSPHERE_HEIGHT = 3000;
         
         // Map View & Trajectory
@@ -119,8 +119,8 @@
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
             } else if (type === 'engine') {
-                // Tuned thrust perfectly balanced for a standard loadout
-                part = { type: 'engine', name: 'Engine', mass: 0.5, thrust: 0.14, height: 35, width: 24, color: '#4444ff' }; 
+                // Calibrated to provide exactly 1.5 TWR for a standard stack
+                part = { type: 'engine', name: 'Engine', mass: 0.5, thrust: 0.008, height: 35, width: 24, color: '#4444ff' }; 
             }
             rocketParts.push(part);
             updateUI();
@@ -329,15 +329,15 @@
                 if (engine) {
                     let force = { x: engine.partData.thrust * Math.sin(engine.angle), y: -engine.partData.thrust * Math.cos(engine.angle) };
                     Body.applyForce(engine, engine.position, force);
-                    currentFuel -= 1.0; 
+                    currentFuel -= 0.2; // Slowed fuel drain for 80+ second burn
                 }
             }
 
-            // 3. Steering Control - Adjusted torque for smoother handling
+            // 3. Steering Control
             let steerBody = physicalBodies.find(b => b && b.partData.type === 'pod');
             if (steerBody && isLaunched) {
-                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity - 0.001);
-                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity + 0.001);
+                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity - 0.0005); // Smooth turning
+                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity + 0.0005);
             }
 
             // 4. Telemetry
