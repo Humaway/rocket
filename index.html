@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V5.1 - Stable Physics Warp</title>
+    <title>Orbital Simulator V5.2 - Stable Staging Update</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -135,7 +135,7 @@
         const gridEl = document.getElementById('build-grid');
         let draggedType = null;
         
-        let stagingList = [[]]; // Array of arrays containing part objects
+        let stagingList = [[]]; 
         let partIdCounter = 0;
 
         gridState[0][2] = { type: 'pod', id: 'pod-0' };
@@ -148,7 +148,7 @@
                 cell.addEventListener('dragstart', e => {
                     if(gridState[r][c] && gridState[r][c].type !== 'tank-large-top') {
                         draggedType = gridState[r][c].type; 
-                        removePart(r, c); // Pick it up
+                        removePart(r, c); 
                         e.dataTransfer.effectAllowed = "move";
                     } else { e.preventDefault(); }
                 });
@@ -224,7 +224,8 @@
             });
         }
 
-        function addStage() { stagingList.unshift([]); renderStagingUI(); }
+        // FIX: Using push() instead of unshift() appends the new stage to the BOTTOM of the list.
+        function addStage() { stagingList.push([]); renderStagingUI(); }
 
         function renderStagingUI() {
             let container = document.getElementById('staging-list-container');
@@ -345,7 +346,6 @@
             shipBodies.push(masterBody);
             activeShipIndex = 0;
 
-            // FIX: Replaced Runner with our custom Fixed-Timestep loop
             if(flightLoopId) cancelAnimationFrame(flightLoopId);
             flightLoopId = requestAnimationFrame(flightLoop);
         }
@@ -353,12 +353,23 @@
         function createCompoundBodyFromData(partDataArray, spawnPos, oldVel = {x:0,y:0}, oldAngle = 0, oldAngVel = 0) {
             let matterParts = []; let totalMass = 0;
             partDataArray.forEach(p => {
-                let rect = Bodies.rectangle(p.localX, p.localY, p.w, p.h, { mass: p.mass, render: { visible: false } });
+                // FIX: Setting group to -1 prevents ALL parts of the ship from ever colliding with each other.
+                // This permanently eliminates the "Explosion on decoupling" bug!
+                let rect = Bodies.rectangle(p.localX, p.localY, p.w, p.h, { 
+                    mass: p.mass, 
+                    render: { visible: false },
+                    collisionFilter: { group: -1 } 
+                });
                 rect.partData = p; matterParts.push(rect); totalMass += p.mass;
             });
             if(matterParts.length === 0) return null;
 
-            let compound = Body.create({ parts: matterParts, mass: totalMass, frictionAir: 0.00 });
+            let compound = Body.create({ 
+                parts: matterParts, 
+                mass: totalMass, 
+                frictionAir: 0.00,
+                collisionFilter: { group: -1 }
+            });
             compound.blueprint = partDataArray; 
             Body.setPosition(compound, spawnPos); Body.setAngle(compound, oldAngle);
             Body.setVelocity(compound, oldVel); Body.setAngularVelocity(compound, oldAngVel);
@@ -505,12 +516,11 @@
             if (mode !== 'flight') return;
             flightLoopId = requestAnimationFrame(flightLoop);
             
-            // Sub-step engine based on warp speed
             let steps = warpLevels[currentWarpIndex];
             
             for(let i=0; i<steps; i++) {
                 gameLoop(); 
-                Engine.update(engine, 16.666); // Hardcoded 60hz tick to guarantee perfect stability
+                Engine.update(engine, 16.666); 
             }
             
             Render.world(render); 
@@ -521,7 +531,6 @@
             let activeBody = shipBodies[activeShipIndex];
             if (!activeBody) return;
 
-            // Moon moves by fixed amount every 1x tick
             moonAngle += moonSpeed;
             MOON_POS.x = Math.sin(moonAngle) * MOON_DIST; MOON_POS.y = -Math.cos(moonAngle) * MOON_DIST;
             Body.setPosition(moonBody, MOON_POS);
@@ -610,7 +619,6 @@
             if (!activeBody || !isLaunched) return [];
             let points = [];
             
-            // FIX: Since we are sub-stepping, engine velocity is 100% accurate at 1x
             let dtSq = Math.pow(16.666, 2); 
             
             let px = activeBody.position.x, py = activeBody.position.y;
