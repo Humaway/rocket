@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V4.4 - Perfect Orbits & Graphics</title>
+    <title>Orbital Simulator V4.5 - Perfect Physics & UI</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -98,7 +98,7 @@
             'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.022, drain: 18.0, w: 48, h: 55, type: 'engine' }  
         };
 
-        // --- 2. VAB GRID LOGIC (5x12) ---
+        // --- 2. VAB GRID LOGIC ---
         const ROWS = 12, COLS = 5;
         let gridState = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
         const gridEl = document.getElementById('build-grid');
@@ -218,7 +218,6 @@
                     let localX = (c - 2) * 50; 
                     let localY = (r - (ROWS/2)) * 50; 
                     
-                    // FIX: Offset large tanks up by 25px so they fit perfectly across two cells
                     if (type === 'tank-large') localY -= 25;
                     
                     rawShipData.push({ id: idCounter++, gridR: r, gridC: c, typeId: type, ...data, localX: localX, localY: localY, fuelRemaining: data.fuel });
@@ -461,16 +460,18 @@
             if (!activeBody || !isLaunched) return [];
             let points = [];
             
-            // Current State
-            let px = activeBody.position.x, py = activeBody.position.y;
-            let vx = activeBody.velocity.x, vy = activeBody.velocity.y;
-            
-            // FIX: Pull exact integration constants from the Matter.js engine state
-            let timeScale = engine.timeScale;
-            let deltaTime = engine.timing.lastDelta || (1000/60);
+            // 1. SAFE TIMING EXTRACTION (Fixes the missing line bug)
+            let timeScale = (engine.timing && engine.timing.timeScale !== undefined) ? engine.timing.timeScale : 1;
+            let deltaTime = (engine.timing && engine.timing.lastDelta) ? engine.timing.lastDelta : (1000/60);
             let dtSq = Math.pow(deltaTime * timeScale, 2); 
             
-            let steps = 100000;
+            let px = activeBody.position.x, py = activeBody.position.y;
+            
+            // 2. MATTER.JS EXACT VELOCITY VERLET REPLICATION (Fixes the drifting orbit)
+            let px_prev = px - activeBody.velocity.x;
+            let py_prev = py - activeBody.velocity.y;
+            
+            let steps = 150000;
             let stepResolution = 50; 
             
             for (let i = 0; i < steps; i++) { 
@@ -481,30 +482,33 @@
                 
                 if (r < PLANET_RADIUS) { points.push({ x: px, y: py }); break; }
                 
-                // 1. Calculate Acceleration Vector
-                let forceMag = GRAVITY_CONSTANT / r2; // Mass cancels out: a = F/m
-                let fx = -(px/r) * forceMag;
+                let forceMag = GRAVITY_CONSTANT / r2;
+                let fx = -(px/r) * forceMag; 
                 let fy = -(py/r) * forceMag;
                 
-                // 2. Air Friction calculation
-                let frictionAir = 0;
+                let frictionAirVal = 0;
                 if (r < PLANET_RADIUS + ATMOSPHERE_HEIGHT) {
                     let dens = 1 - ((r - PLANET_RADIUS) / ATMOSPHERE_HEIGHT);
-                    frictionAir = 0.005 * dens; 
+                    frictionAirVal = 0.005 * dens; 
                 }
-                let friction = 1 - frictionAir * timeScale;
                 
-                // FIX: Exact Matter.js Velocity Verlet integration
-                vx = vx * friction + fx * dtSq;
-                vy = vy * friction + fy * dtSq;
+                // Matter.js mathematically applies friction like this internally
+                let friction = 1 - frictionAirVal * timeScale;
+                
+                let vPrevX = px - px_prev;
+                let vPrevY = py - py_prev;
+
+                let vx = (vPrevX * friction) + fx * dtSq;
+                let vy = (vPrevY * friction) + fy * dtSq;
+
+                px_prev = px;
+                py_prev = py;
 
                 px += vx; 
                 py += vy;
 
-                // Max flight bounds
                 if (r > PLANET_RADIUS * 12) break; 
                 
-                // Complete the circle if we've looped an orbit
                 if (i > 1000 && Math.pow(px - activeBody.position.x, 2) + Math.pow(py - activeBody.position.y, 2) < 4000000) {
                     points.push({ x: px, y: py }); break; 
                 }
@@ -520,7 +524,7 @@
             let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x);
             let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
 
-            // Manual Planet Render (Avoids Canvas WebGL Crash)
+            // Manual Planet Render
             ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); 
             let pScreenX = (0 - bounds.min.x) * scaleX;
             let pScreenY = (0 - bounds.min.y) * scaleY;
@@ -573,12 +577,16 @@
                     let d = sub.partData; if(!d) return;
 
                     ctx.save();
+                    ctx.setTransform(1, 0, 0, 1, 0, 0); // BUGFIX: Ensure clean slate transform
                     
                     let sx = (sub.position.x - bounds.min.x) * scaleX;
                     let sy = (sub.position.y - bounds.min.y) * scaleY;
                     
                     ctx.translate(sx, sy);
-                    ctx.rotate(sub.angle);
+                    
+                    // BUGFIX: Explicitly lock the drawing rotation to the master body's world angle 
+                    ctx.rotate(body.angle); 
+                    
                     ctx.scale(scaleX, scaleY); 
 
                     if(d.type === 'pod') {
@@ -591,8 +599,6 @@
                     } else if (d.type === 'engine') {
                         ctx.fillStyle = '#475569'; ctx.fillRect(-d.w/4, -d.h/2, d.w/2, d.h/2); 
                         ctx.fillStyle = '#1e293b'; ctx.beginPath(); 
-                        
-                        // FIX: Updated nozzle geometry to be a perfectly symmetric trapezoid
                         ctx.moveTo(-d.w/4, 0); ctx.lineTo(d.w/4, 0); ctx.lineTo(d.w/2, d.h/2); ctx.lineTo(-d.w/2, d.h/2); ctx.closePath(); ctx.fill();
                         
                         if(d.isBurning) {
