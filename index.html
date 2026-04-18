@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Simple Canvas Rockets</title>
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; font-family: sans-serif; overflow: hidden; display: flex; }
+        #sidebar { width: 250px; background: #333; padding: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 10; }
+        #canvas-container { flex-grow: 1; position: relative; }
+        canvas { background: #050505; display: block; width: 100%; height: 100%; }
+        .part-btn { padding: 10px; background: #555; border: none; color: white; cursor: pointer; text-align: left; border-radius: 4px; }
+        .part-btn:hover { background: #777; }
+        #launch-btn { padding: 15px; background: #28a745; border: none; color: white; font-weight: bold; cursor: pointer; margin-top: 20px; border-radius: 4px; }
+        .controls { position: absolute; bottom: 20px; left: 20px; pointer-events: none; opacity: 0.7; }
+        .hud { position: absolute; top: 20px; right: 20px; text-align: right; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>Build Mode</h2>
+    <p>Click parts to add them. They snap to the bottom of the previous part.</p>
+    <button class="part-btn" onclick="addPart('capsule')">🚀 Command Pod (Base)</button>
+    <button class="part-btn" onclick="addPart('tank')">🛢️ Fuel Tank</button>
+    <button class="part-btn" onclick="addPart('engine')">🔥 Rocket Engine</button>
+    <button class="part-btn" onclick="addPart('decoupler')">🔓 Decoupler</button>
+    <button class="part-btn" onclick="addPart('parachute')">🪂 Parachute</button>
+    
+    <button id="launch-btn" onclick="toggleFlight()">LIFT OFF!</button>
+    <button class="part-btn" style="background:#a72828" onclick="resetBuild()">Reset Build</button>
+</div>
+
+<div id="canvas-container">
+    <div class="hud" id="hud" style="display:none">
+        <h3 id="alt-display">Altitude: 0m</h3>
+        <p id="fuel-display">Fuel: 100%</p>
+    </div>
+    <div class="controls" id="controls-hint">
+        <b>W / Up:</b> Thrust | <b>A/D / Left/Right:</b> Steer | <b>Space:</b> Stage / Decouple
+    </div>
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const hud = document.getElementById('hud');
+
+let isFlight = false;
+let rocket = []; // Array of part objects
+let velocity = { x: 0, y: 0 };
+let pos = { x: 0, y: 0 };
+let angle = -Math.PI / 2; // Facing up
+let thrusting = false;
+let fuel = 100;
+let parachuteDeployed = false;
+
+// Part Definitions
+const PART_TYPES = {
+    capsule:  { w: 30, h: 30, color: '#aaa', mass: 1, type: 'root' },
+    tank:     { w: 30, h: 40, color: '#ddd', mass: 2, type: 'fuel' },
+    engine:   { w: 24, h: 20, color: '#555', mass: 1, type: 'engine' },
+    decoupler:{ w: 32, h: 10, color: '#f39c12', mass: 0.5, type: 'decouple' },
+    parachute:{ w: 20, h: 10, color: '#e74c3c', mass: 0.5, type: 'chute' }
+};
+
+function resize() {
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function addPart(type) {
+    if (isFlight) return;
+    const template = PART_TYPES[type];
+    let yOffset = 0;
+    if (rocket.length > 0) {
+        const lastPart = rocket[rocket.length - 1];
+        yOffset = lastPart.y + lastPart.h;
+    }
+    rocket.push({ ...template, x: -template.w/2, y: yOffset });
+}
+
+function resetBuild() {
+    rocket = [];
+    isFlight = false;
+    hud.style.display = 'none';
+    pos = { x: canvas.width/2, y: canvas.height - 100 };
+    velocity = { x: 0, y: 0 };
+    angle = -Math.PI / 2;
+    fuel = 100;
+    parachuteDeployed = false;
+}
+
+function toggleFlight() {
+    if (rocket.length === 0) return alert("Build a rocket first!");
+    isFlight = !isFlight;
+    if (isFlight) {
+        pos = { x: canvas.width/2, y: canvas.height - 100 };
+        hud.style.display = 'block';
+    } else {
+        resetBuild();
+    }
+}
+
+// Input Handling
+const keys = {};
+window.onkeydown = (e) => {
+    keys[e.key] = true;
+    if (e.code === 'Space' && isFlight) stageRocket();
+};
+window.onkeyup = (e) => keys[e.key] = false;
+
+function stageRocket() {
+    // Logic to find the last decoupler and remove everything below it
+    const decoupleIdx = rocket.findLastIndex(p => p.type === 'decouple');
+    if (decoupleIdx !== -1) {
+        rocket = rocket.slice(0, decoupleIdx);
+    } else {
+        // If no decoupler, check for parachute
+        const chute = rocket.find(p => p.type === 'chute');
+        if (chute) parachuteDeployed = true;
+    }
+}
+
+function update() {
+    if (isFlight) {
+        // Steering
+        if (keys['ArrowLeft'] || keys['a']) angle -= 0.05;
+        if (keys['ArrowRight'] || keys['d']) angle += 0.05;
+
+        // Thrust
+        const hasEngine = rocket.some(p => p.type === 'engine');
+        thrusting = (keys['ArrowUp'] || keys['w']) && fuel > 0 && hasEngine;
+
+        if (thrusting) {
+            velocity.x += Math.cos(angle) * 0.2;
+            velocity.y += Math.sin(angle) * 0.2;
+            fuel -= 0.2;
+        }
+
+        // Gravity & Drag
+        velocity.y += 0.05; // Gravity
+        if (parachuteDeployed) {
+            velocity.y *= 0.95; // High drag
+            velocity.x *= 0.95;
+        }
+
+        pos.x += velocity.x;
+        pos.y += velocity.y;
+
+        // Ground Collision
+        if (pos.y > canvas.height - 50) {
+            pos.y = canvas.height - 50;
+            velocity.y = 0;
+            velocity.x *= 0.8;
+        }
+
+        // Update HUD
+        document.getElementById('alt-display').innerText = `Altitude: ${Math.floor((canvas.height - 50 - pos.y))}m`;
+        document.getElementById('fuel-display').innerText = `Fuel: ${Math.max(0, Math.floor(fuel))}%`;
+    }
+
+    draw();
+    requestAnimationFrame(update);
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw Ground
+    ctx.fillStyle = '#333';
+    ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+
+    ctx.save();
+    if (isFlight) {
+        ctx.translate(pos.x, pos.y);
+        ctx.rotate(angle + Math.PI/2);
+    } else {
+        ctx.translate(canvas.width/2, 200);
+    }
+
+    // Draw Rocket Parts
+    rocket.forEach(part => {
+        ctx.fillStyle = part.color;
+        ctx.fillRect(part.x, part.y, part.w, part.h);
+        
+        // Draw Engine Flame
+        if (thrusting && part.type === 'engine') {
+            ctx.fillStyle = 'orange';
+            ctx.beginPath();
+            ctx.moveTo(part.x, part.y + part.h);
+            ctx.lineTo(part.x + part.w/2, part.y + part.h + 30 + Math.random()*10);
+            ctx.lineTo(part.x + part.w, part.y + part.h);
+            ctx.fill();
+        }
+    });
+
+    // Draw Parachute
+    if (parachuteDeployed) {
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(0, -40, 40, Math.PI, 0);
+        ctx.fill();
+        ctx.strokeStyle = 'white';
+        ctx.beginPath(); ctx.moveTo(-40, -40); ctx.lineTo(0, 0); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(40, -40); ctx.lineTo(0, 0); ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+// Start
+resetBuild();
+update();
+</script>
+</body>
+</html>
