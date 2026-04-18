@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V5.2 - Stable Staging Update</title>
+    <title>Orbital Simulator V5.3 - Big Rockets & Stable Staging</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -18,19 +18,19 @@
         .part-btn { background: #1e293b; border: 2px solid #334; border-radius: 6px; padding: 8px; cursor: grab; text-align: center; font-size: 0.75rem; font-weight: bold; transition: 0.2s; }
         .part-btn:active { cursor: grabbing; border-color: #00ffcc; }
         
-        /* Grid */
-        .grid-container { display: grid; grid-template-columns: repeat(5, 50px); grid-auto-rows: 50px; gap: 2px; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; border: 1px dashed #445; }
+        /* 11x15 Grid */
+        .grid-container { display: grid; grid-template-columns: repeat(11, 50px); grid-auto-rows: 50px; gap: 2px; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; border: 1px dashed #445; }
         .grid-cell { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: #fff; transition: 0.2s; position: relative; cursor: grab; }
         .grid-cell.drag-over { background: rgba(0, 255, 204, 0.3); border-color: #00ffcc; }
         .grid-cell.filled { border-color: #fff; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
         
         /* Staging UI */
-        .staging-panel { background: rgba(0,0,0,0.8); border: 1px solid #445; border-radius: 8px; padding: 10px; width: 220px; max-height: 600px; overflow-y: auto; }
+        .staging-panel { background: rgba(0,0,0,0.8); border: 1px solid #445; border-radius: 8px; padding: 10px; width: 220px; max-height: 750px; overflow-y: auto; }
         .stage-group { background: #0f172a; border: 1px dashed #334; margin-bottom: 10px; padding: 5px; border-radius: 6px; min-height: 40px; }
         .stage-group.drag-over { border-color: #eab308; background: rgba(234, 179, 8, 0.1); }
         .stage-group-title { font-size: 0.7rem; color: #eab308; margin-bottom: 5px; font-weight: bold; }
         .stage-item { background: #1e293b; border: 1px solid #334; padding: 4px 8px; margin-bottom: 4px; border-radius: 4px; font-size: 0.7rem; cursor: grab; display: flex; justify-content: space-between; }
-        .stage-add-btn { background: #334; color: white; border: none; flex: 1; padding: 8px 4px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
+        .stage-add-btn { background: #334; color: white; border: none; width: 100%; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; font-weight: bold; }
         .stage-add-btn:hover { background: #445; }
 
         /* Menu Colors */
@@ -64,7 +64,7 @@
 
     <div id="vab-ui" class="panel">
         <h2>Vehicle Assembly</h2>
-        <div class="instruction">Drag parts to the grid. Setup stages on the right.</div>
+        <div class="instruction">Drag parts to the grid. Middle column is your core. Add stages below.</div>
         
         <div class="vab-layout">
             <div class="palette">
@@ -85,8 +85,7 @@
                 <div style="font-size: 0.8rem; margin-bottom: 10px; color:#00ffcc;">DRAG & DROP STAGING</div>
                 <div id="staging-list-container"></div>
                 <div style="display: flex; gap: 5px; margin-top: 10px;">
-                    <button class="stage-add-btn" onclick="addStageTop()">+ Top (Last)</button>
-                    <button class="stage-add-btn" onclick="addStageBottom()">+ Btm (First)</button>
+                    <button class="stage-add-btn" onclick="addStage()">+ Add Stage</button>
                 </div>
             </div>
         </div>
@@ -127,13 +126,13 @@
             'decoupler': { mass: 0.2, fuel: 0, thrust: 0, w: 48, h: 12, type: 'decoupler' },
             'radial': { mass: 0.2, fuel: 0, thrust: 0, w: 16, h: 40, type: 'radial' },
             'leg': { mass: 0.1, fuel: 0, thrust: 0, w: 20, h: 40, type: 'leg' },
-            'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.0015, drain: 3.0, w: 30, h: 35, type: 'engine', name: 'Vac Engine' }, 
-            'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.005, drain: 10.0, w: 40, h: 45, type: 'engine', name: 'Booster' }, 
-            'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.012, drain: 25.0, w: 48, h: 55, type: 'engine', name: 'Heavy Engine' }  
+            'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.0015, drain: 3.0, w: 30, h: 35, type: 'engine' }, 
+            'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.005, drain: 10.0, w: 40, h: 45, type: 'engine' }, 
+            'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.012, drain: 25.0, w: 48, h: 55, type: 'engine' }  
         };
 
-        // --- 2. VAB GRID & STAGING LOGIC ---
-        const ROWS = 12, COLS = 5;
+        // --- 2. VAB GRID (11x15) & STAGING LOGIC ---
+        const ROWS = 15, COLS = 11;
         let gridState = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
         const gridEl = document.getElementById('build-grid');
         let draggedType = null;
@@ -141,7 +140,7 @@
         let stagingList = [[]]; 
         let partIdCounter = 0;
 
-        gridState[0][2] = { type: 'pod', id: 'pod-0' };
+        gridState[0][5] = { type: 'pod', id: 'pod-0' }; // Center pod on Column 5
 
         for(let r=0; r<ROWS; r++) {
             for(let c=0; c<COLS; c++) {
@@ -170,7 +169,6 @@
         function handleDrop(e, r, c, cell) {
             e.preventDefault(); cell.classList.remove('drag-over');
             if(!draggedType) return;
-            if((draggedType === 'radial' || draggedType === 'leg') && c !== 1 && c !== 3 && c !== 0 && c !== 4) return;
             
             let newId = `part-${partIdCounter++}`;
             let pObj = { type: draggedType, id: newId };
@@ -227,9 +225,8 @@
             });
         }
 
-        // NEW: Two distinct add stage buttons to prevent dragging UI mess
-        function addStageTop() { stagingList.unshift([]); renderStagingUI(); }
-        function addStageBottom() { stagingList.push([]); renderStagingUI(); }
+        // Drop new empty stage at the bottom so old parts move up
+        function addStage() { stagingList.push([]); renderStagingUI(); }
 
         function renderStagingUI() {
             let container = document.getElementById('staging-list-container');
@@ -335,7 +332,7 @@
                     if(!pObj || pObj.type === 'tank-large-top') continue;
                     
                     let data = PART_DATA[pObj.type];
-                    let localX = (c - 2) * 50; 
+                    let localX = (c - 5) * 50; 
                     let localY = (r - (ROWS/2)) * 50; 
                     if (pObj.type === 'tank-large') localY -= 25;
                     
@@ -365,7 +362,7 @@
 
             let compound = Body.create({ parts: matterParts, mass: totalMass, frictionAir: 0.00 });
             
-            // FIX: Hard-lock collision filters for ALL parts to -1, eliminating overlapping body explosions entirely
+            // Hard-lock all collision groups to -1 to prevent overlapping self-explosions
             compound.collisionFilter.group = -1;
             compound.parts.forEach(p => { if (p) p.collisionFilter.group = -1; });
             
@@ -376,13 +373,12 @@
         }
 
         // --- 4. FLIGHT CONTROLS & STAGING EXECUTION ---
-        let spacePressed = false; // Anti-spam variable
+        let spacePressed = false;
         
         window.addEventListener('keydown', (e) => {
             if(mode !== 'flight') return;
             keys[e.code] = true;
             
-            // Anti-spam to stop holding SPACE from firing all stages in 1 frame
             if (e.code === 'Space' && isLaunched && !spacePressed) {
                 spacePressed = true;
                 executeStaging();
@@ -452,11 +448,19 @@
                 }
             });
 
-            // If the stage just turned on an engine or parachute but had no explosive decouplers, skip splitting
             if (targetsToDestroy.length === 0) return;
 
+            // FIX: Map out all connected grid cells. 
+            // We explicitly tie the TOP of the Large Tank back to its bottom half so the BFS doesn't hit a dead end and shatter the ship.
             let adjGrid = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
-            bp.forEach(p => { if(!targetsToDestroy.includes(p)) adjGrid[p.gridR][p.gridC] = p; });
+            bp.forEach(p => { 
+                if(!targetsToDestroy.includes(p)) {
+                    adjGrid[p.gridR][p.gridC] = p; 
+                    if (p.typeId === 'tank-large' && p.gridR > 0) {
+                        adjGrid[p.gridR - 1][p.gridC] = p; 
+                    }
+                }
+            });
 
             let pod = bp.find(p => p.type === 'pod');
             if(!pod) return; 
@@ -467,13 +471,22 @@
                 if(visited.has(key)) continue;
                 visited.add(key); activeBlueprint.push(curr);
 
-                let neighbors = [ {r: curr.gridR-1, c: curr.gridC}, {r: curr.gridR+1, c: curr.gridC}, {r: curr.gridR, c: curr.gridC-1}, {r: curr.gridR, c: curr.gridC+1} ];
-                if(curr.typeId === 'tank-large') neighbors.push({r: curr.gridR-2, c: curr.gridC});
+                let neighbors = [ 
+                    {r: curr.gridR-1, c: curr.gridC}, {r: curr.gridR+1, c: curr.gridC}, 
+                    {r: curr.gridR, c: curr.gridC-1}, {r: curr.gridR, c: curr.gridC+1} 
+                ];
+                
+                // Add extended neighbors for the top half of the large tank
+                if(curr.typeId === 'tank-large') {
+                    neighbors.push({r: curr.gridR-2, c: curr.gridC});
+                    neighbors.push({r: curr.gridR-1, c: curr.gridC-1});
+                    neighbors.push({r: curr.gridR-1, c: curr.gridC+1});
+                }
 
                 neighbors.forEach(n => {
                     if(n.r >= 0 && n.r < ROWS && n.c >= 0 && n.c < COLS) {
-                        let nPart = adjGrid[n.r][n.c]; if(nPart) queue.push(nPart);
-                        if(adjGrid[n.r][n.c] && adjGrid[n.r][n.c].typeId === 'tank-large-top' && adjGrid[n.r+1][n.c]) queue.push(adjGrid[n.r+1][n.c]);
+                        let nPart = adjGrid[n.r][n.c]; 
+                        if(nPart) queue.push(nPart);
                     }
                 });
             }
@@ -487,9 +500,14 @@
                         let c = dQ.shift(); let dK = `${c.gridR}-${c.gridC}`;
                         if(visited.has(dK)) continue;
                         visited.add(dK); debBp.push(c);
+                        
                         let nbs = [ {r: c.gridR-1, c: c.gridC}, {r: c.gridR+1, c: c.gridC}, {r: c.gridR, c: c.gridC-1}, {r: c.gridR, c: c.gridC+1} ];
+                        if(c.typeId === 'tank-large') { nbs.push({r: c.gridR-2, c: c.gridC}, {r: c.gridR-1, c: c.gridC-1}, {r: c.gridR-1, c: c.gridC+1}); }
+                        
                         nbs.forEach(n => {
-                            if(n.r >= 0 && n.r < ROWS && n.c >= 0 && n.c < COLS) { let nP = adjGrid[n.r][n.c]; if(nP && !targetsToDestroy.includes(nP)) dQ.push(nP); }
+                            if(n.r >= 0 && n.r < ROWS && n.c >= 0 && n.c < COLS) { 
+                                let nP = adjGrid[n.r][n.c]; if(nP && !targetsToDestroy.includes(nP)) dQ.push(nP); 
+                            }
                         });
                     }
                     if(debBp.length > 0) allDebrisBlueprints.push(debBp);
@@ -502,17 +520,13 @@
 
             Composite.remove(engine.world, activeBody); shipBodies.splice(activeShipIndex, 1);
 
-            // FIX: Calculating exact linear velocity of the NEW center of mass based on old angular momentum.
             if (activeBlueprint.length > 0) {
                 let newShip = createCompoundBodyFromData(activeBlueprint, {x:0, y:0}, {x:0,y:0}, oldAngle, oldAngVel);
                 let newPodBody = newShip.parts.find(sub => sub.partData && sub.partData.type === 'pod');
                 let targetPos = Vector.add(podWorldPos, Vector.sub(newShip.position, newPodBody.position));
                 Body.setPosition(newShip, targetPos);
-                
-                let dx = newShip.position.x - activeBody.position.x;
-                let dy = newShip.position.y - activeBody.position.y;
+                let dx = newShip.position.x - activeBody.position.x; let dy = newShip.position.y - activeBody.position.y;
                 let exactVel = { x: activeBody.velocity.x - oldAngVel * dy, y: activeBody.velocity.y + oldAngVel * dx };
-                
                 Body.setVelocity(newShip, exactVel);
                 shipBodies.push(newShip); activeShipIndex = shipBodies.length - 1;
             }
@@ -521,19 +535,17 @@
                 let debShip = createCompoundBodyFromData(debBp, {x:0, y:0}, {x:0,y:0}, oldAngle, oldAngVel);
                 let anchorOld = activeBody.parts.find(sub => sub.partData && sub.partData.id === debBp[0].id);
                 let anchorNew = debShip.parts.find(sub => sub.partData && sub.partData.id === debBp[0].id);
-                
                 if(anchorOld && anchorNew) {
                     let targetPos = Vector.add(anchorOld.position, Vector.sub(debShip.position, anchorNew.position));
                     Body.setPosition(debShip, targetPos);
-                    let dx = debShip.position.x - activeBody.position.x;
-                    let dy = debShip.position.y - activeBody.position.y;
+                    let dx = debShip.position.x - activeBody.position.x; let dy = debShip.position.y - activeBody.position.y;
                     let exactVel = { x: activeBody.velocity.x - oldAngVel * dy, y: activeBody.velocity.y + oldAngVel * dx };
                     Body.setVelocity(debShip, exactVel);
                 }
 
-                let sepForce = 0.002 * debShip.mass; // Scaled to prevent wildly heavy/light parts behaving differently
+                let sepForce = 0.002 * debShip.mass;
                 if(targetsToDestroy[0].type === 'radial') { 
-                    let dir = debBp[0].gridC < 2 ? -1 : 1;
+                    let dir = debBp[0].gridC < 5 ? -1 : 1;
                     Body.applyForce(debShip, debShip.position, { x: Math.cos(oldAngle) * sepForce * dir, y: Math.sin(oldAngle) * sepForce * dir });
                 } else { 
                     Body.applyForce(debShip, debShip.position, { x: -Math.sin(oldAngle) * sepForce, y: Math.cos(oldAngle) * sepForce }); 
