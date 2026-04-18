@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - True Orbits</title>
+    <title>Orbital Rocket Simulator - Keplerian Physics</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -90,21 +90,16 @@
         let currentStageIndex = 0;
         let isLaunched = false;
         
-        // --- HIGH-G PLANETARY PHYSICS ---
         let planetBody;
         const PLANET_RADIUS = 500000; 
         const PLANET_POS = { x: 0, y: 0 }; 
-        // 10x stronger gravity to ensure strong parabolic/elliptical curvature
-        const GRAVITY_CONSTANT = 2500000000; 
+        const GRAVITY_CONSTANT = 250000000; 
         const ATMOSPHERE_HEIGHT = 50000; 
         
         let isMapView = false;
-        let mapCameraViewSpan = PLANET_RADIUS * 1.3; 
-
-        // Trajectory Caching System
-        let cachedPrediction = [];
         let historicalTrajectory = [];
         let tickCounter = 0;
+        let mapCameraViewSpan = PLANET_RADIUS * 1.3; 
 
         updateUI();
 
@@ -119,14 +114,14 @@
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
             } else if (type === 'vacuum') {
-                // Buffed by 12x to counter the 10x gravity increase. Excellent orbital engine.
-                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.018, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
+                // TWR ~ 0.5. Very low thrust, but extremely efficient fuel usage.
+                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.0005, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
             } else if (type === 'booster') {
-                // Strong standard lifter
-                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.075, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
+                // TWR ~ 1.3 for medium payloads
+                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.0026, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
             } else if (type === 'heavy') {
-                // Absolute beast for heavy multi-stage builds
-                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.24, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
+                // TWR ~ 1.3 for massive multi-stage setups. High fuel consumption.
+                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.0058, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
             }
             
             rocketParts.push(JSON.parse(JSON.stringify(part)));
@@ -190,7 +185,6 @@
             isLaunched = false;
             isMapView = false;
             historicalTrajectory = [];
-            cachedPrediction = [];
             initPhysics();
         }
 
@@ -326,16 +320,12 @@
 
             // 1. Radial Gravity
             let allBodies = [activeShip, ...debrisBodies];
-            let currentShipDist = 0;
-
             allBodies.forEach(body => {
                 if(!body) return;
                 let dir = Vector.sub(PLANET_POS, body.position);
                 let distSq = (dir.x * dir.x) + (dir.y * dir.y);
                 let dist = Math.sqrt(distSq);
                 
-                if (body === activeShip) currentShipDist = dist;
-
                 if (isLaunched && dist > PLANET_RADIUS) {
                     let forceMag = (GRAVITY_CONSTANT * body.mass) / distSq;
                     let force = Vector.mult(Vector.normalise(dir), forceMag);
@@ -348,11 +338,11 @@
                 if (body === activeShip) atmoPercentDisplay = Math.floor(atmoDensity * 100);
 
                 if(body.partsData && body.partsData[0].type !== 'parachute') {
-                    Body.set(body, 'frictionAir', 0.01 * atmoDensity); // Reduced base drag for realistic coasting
+                    Body.set(body, 'frictionAir', 0.01 * atmoDensity);
                 }
             });
 
-            // 2. Isolated Fuel Drain
+            // 2. Stage-Isolated Fuel Drain
             let stageStartIndex = 0;
             let stageEndIndex = activeShip.partsData.length - 1;
 
@@ -396,19 +386,9 @@
             }
 
             // 3. Steering Control
-            let isTurning = false;
             if (isLaunched) {
-                if (keys['KeyA'] || keys['ArrowLeft']) { Body.setAngularVelocity(activeShip, activeShip.angularVelocity - 0.0006); isTurning = true; }
-                if (keys['KeyD'] || keys['ArrowRight']) { Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006); isTurning = true; }
-            }
-
-            // --- STABILIZED PREDICTION CACHE ---
-            // Only recalculate the trajectory if we are in atmosphere, firing engines, or turning.
-            // In deep space, coasting creates a perfectly stable, non-wiggling cached line.
-            if (isEngineBurning || isTurning || currentShipDist < PLANET_RADIUS + ATMOSPHERE_HEIGHT) {
-                cachedPrediction = calculatePredictedTrajectory();
-            } else if (tickCounter % 60 === 0) { // Occasional background refresh in deep space
-                cachedPrediction = calculatePredictedTrajectory();
+                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity - 0.0006);
+                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006);
             }
 
             // 4. Calculate Telemetry 
@@ -424,8 +404,9 @@
                 }
             }
 
-            let altitudeRaw = currentShipDist - PLANET_RADIUS;
-            let speedRaw = Vector.magnitude(activeShip.velocity) * 5;
+            let currentDist = Vector.magnitude(Vector.sub(PLANET_POS, activeShip.position));
+            let altitudeRaw = currentDist - PLANET_RADIUS;
+            let speedRaw = Vector.magnitude(activeShip.velocity) * 5; // Visual speed multiplier
             let fuelPercentage = stageFuelMax > 0 ? Math.max(0, Math.floor((stageFuelRemaining / stageFuelMax) * 100)) : 0;
 
             document.getElementById('tel-alt').innerText = (altitudeRaw / 100).toFixed(2) + ' km';
@@ -446,7 +427,7 @@
                 let dy = Math.abs(activeShip.position.y - PLANET_POS.y);
                 let shipDist = Math.sqrt(dx*dx + dy*dy);
                 
-                // Allow dynamic zoom, but cap the min-zoom so the planet never disappears
+                // Allow dynamic zoom to frame both planet and ship
                 mapCameraViewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.5; 
                 
                 Render.lookAt(render, {
@@ -463,63 +444,83 @@
             }
         }
 
-        // --- HIGH-SPEED SYMPLECTIC EULER PREDICTION ---
-        function calculatePredictedTrajectory() {
-            if (!activeShip || !isLaunched) return [];
+        // --- PURE KEPLERIAN ORBIT RENDERER ---
+        function drawKeplerOrbit(ctx, ship, planetPos, mu) {
+            let rx = ship.position.x - planetPos.x;
+            let ry = ship.position.y - planetPos.y;
+            let vx = ship.velocity.x;
+            let vy = ship.velocity.y;
+
+            let r = Math.sqrt(rx*rx + ry*ry);
+            let v2 = vx*vx + vy*vy;
+            let r_dot_v = rx*vx + ry*vy;
+
+            // Specific orbital energy
+            let epsilon = (v2 / 2) - (mu / r);
+            let a = -mu / (2 * epsilon);
+
+            // Eccentricity vector
+            let ex = ( (v2 - mu/r)*rx - r_dot_v*vx ) / mu;
+            let ey = ( (v2 - mu/r)*ry - r_dot_v*vy ) / mu;
+            let e = Math.sqrt(ex*ex + ey*ey);
+
+            let scaleX = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
+            let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
             
-            let simPos = { x: activeShip.position.x, y: activeShip.position.y };
-            let simVel = { x: activeShip.velocity.x, y: activeShip.velocity.y };
-            let path = [];
-            
-            let dt = 15; // 15 frames per tick (High speed integration)
-            let maxSteps = 4000; // 60,000 frames into the future (Enough for full orbit)
-            let drawInterval = 10; 
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Lock to monitor pixels
+            ctx.strokeStyle = 'rgba(0, 200, 255, 0.9)'; // Bright Cyan
+            ctx.lineWidth = 3; 
 
-            for(let i=0; i < maxSteps; i++) {
-                if (i % drawInterval === 0) path.push({x: simPos.x, y: simPos.y});
-
-                let dirX = PLANET_POS.x - simPos.x;
-                let dirY = PLANET_POS.y - simPos.y;
-                let distSq = dirX*dirX + dirY*dirY;
-                let dist = Math.sqrt(distSq);
-
-                // Ground Collision
-                if (dist < PLANET_RADIUS) {
-                    path.push({x: simPos.x, y: simPos.y}); 
-                    break; 
-                }
-
-                // Escape Velocity Bounds (If it goes 6x the planet radius, it's gone)
-                if (dist > PLANET_RADIUS * 6) {
-                    break;
-                }
-
-                // Gravity
-                let safeDistSq = Math.max(distSq, PLANET_RADIUS * PLANET_RADIUS);
-                let forceMag = GRAVITY_CONSTANT / safeDistSq; 
-                let accX = (dirX / dist) * forceMag;
-                let accY = (dirY / dist) * forceMag;
-
-                // Atmosphere Friction
-                if (dist < PLANET_RADIUS + ATMOSPHERE_HEIGHT) {
-                    let atmoDensity = Math.max(0, 1 - ((dist - PLANET_RADIUS) / ATMOSPHERE_HEIGHT));
-                    // Compound integration math for accurate friction over `dt` frames
-                    let friction = Math.pow(1 - (0.01 * atmoDensity), dt); 
-                    simVel.x *= friction;
-                    simVel.y *= friction;
-                }
-
-                // Apply Acceleration to Velocity
-                simVel.x += accX * dt;
-                simVel.y += accY * dt;
+            if (e < 1 && a > 0) {
+                // ELLIPSE (Stable Orbit)
+                let b = a * Math.sqrt(1 - e*e);
                 
-                // Apply Velocity to Position
-                simPos.x += simVel.x * dt;
-                simPos.y += simVel.y * dt;
+                // Center of ellipse is offset from focus by -a*e in direction of periapsis
+                let cx = planetPos.x - a * ex;
+                let cy = planetPos.y - a * ey;
+                let angle = Math.atan2(ey, ex);
+
+                let sx = (cx - render.bounds.min.x) * scaleX;
+                let sy = (cy - render.bounds.min.y) * scaleY;
+                let sa = a * scaleX;
+                let sb = b * scaleY;
+
+                ctx.beginPath();
+                ctx.ellipse(sx, sy, sa, sb, angle, 0, 2 * Math.PI);
+                ctx.stroke();
+            } else {
+                // HYPERBOLA (Escape Trajectory)
+                // We use a small, safe numeric integrator just to draw the escape path
+                ctx.beginPath();
+                let simX = ship.position.x;
+                let simY = ship.position.y;
+                let simVx = vx;
+                let simVy = vy;
+                let dt = 3; 
                 
-                if(isNaN(simPos.x) || isNaN(simPos.y)) break;
+                for(let i=0; i<800; i++) {
+                    let sx = (simX - render.bounds.min.x) * scaleX;
+                    let sy = (simY - render.bounds.min.y) * scaleY;
+                    if(i===0) ctx.moveTo(sx, sy);
+                    else ctx.lineTo(sx, sy);
+
+                    let dirX = planetPos.x - simX;
+                    let dirY = planetPos.y - simY;
+                    let distSq = dirX*dirX + dirY*dirY;
+                    let dist = Math.sqrt(distSq);
+                    
+                    if (dist > PLANET_RADIUS * 6) break; // Escaped view
+
+                    let forceMag = mu / distSq;
+                    simVx += (dirX/dist) * forceMag * dt;
+                    simVy += (dirY/dist) * forceMag * dt;
+                    simX += simVx * dt;
+                    simY += simVy * dt;
+                }
+                ctx.stroke();
             }
-            return path;
+            ctx.restore();
         }
 
         function customRender() {
@@ -529,26 +530,9 @@
             let scaleX = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
             let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
 
-            // 1. Draw Predictive Trajectory (Cyan)
-            if (isMapView && isLaunched && cachedPrediction.length > 1) {
-                ctx.save();
-                ctx.setTransform(1, 0, 0, 1, 0, 0); 
-                ctx.beginPath();
-                ctx.strokeStyle = 'rgba(0, 200, 255, 0.9)'; 
-                ctx.lineWidth = 4; 
-                
-                for(let i = 0; i < cachedPrediction.length; i++) {
-                    let sx = (cachedPrediction[i].x - render.bounds.min.x) * scaleX;
-                    let sy = (cachedPrediction[i].y - render.bounds.min.y) * scaleY;
-                    
-                    // Safety clip to prevent canvas drawing anomalies
-                    if(sx > -5000 && sx < window.innerWidth + 5000 && sy > -5000 && sy < window.innerHeight + 5000) {
-                        if(i === 0) ctx.moveTo(sx, sy);
-                        else ctx.lineTo(sx, sy);
-                    }
-                }
-                ctx.stroke();
-                ctx.restore();
+            // 1. Draw True Mathematical Orbit (Only in Map View)
+            if (isMapView && isLaunched && activeShip) {
+                drawKeplerOrbit(ctx, activeShip, PLANET_POS, GRAVITY_CONSTANT);
             }
 
             // 2. Draw Historical Trail (Faded Red)
@@ -584,7 +568,7 @@
 
                 ctx.rotate(activeShip.angle);
                 
-                // Ship Arrow
+                // Neon Ship Icon
                 ctx.fillStyle = '#00ffcc';
                 ctx.beginPath();
                 ctx.moveTo(0, -markerSize); 
@@ -593,12 +577,14 @@
                 ctx.closePath();
                 ctx.fill();
                 
+                // Map Exhaust Fire
                 if (isEngineBurning) {
                     ctx.fillStyle = '#ff4400';
                     ctx.beginPath();
                     ctx.arc(0, markerSize * 1.5, markerSize/2, 0, 2*Math.PI);
                     ctx.fill();
                 }
+                
                 ctx.restore();
             }
 
