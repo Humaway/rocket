@@ -235,7 +235,6 @@
             let matterParts = [];
             let totalMass = 0;
             partDataArray.forEach(p => {
-                // HIDE the default matter.js blocks so we can draw custom graphics over them
                 let rect = Bodies.rectangle(p.localX, p.localY, p.w, p.h, { mass: p.mass, render: { visible: false } });
                 rect.partData = p; 
                 matterParts.push(rect);
@@ -405,7 +404,7 @@
                         for(let t of activeBody.blueprint) {
                             if(t.type === 'tank' && t.fuelRemaining >= p.drain) {
                                 t.fuelRemaining -= p.drain;
-                                stageFuelRemaining -= p.drain; // Update dynamic tracker
+                                stageFuelRemaining -= p.drain;
                                 hasFuel = true; break;
                             }
                         }
@@ -422,7 +421,7 @@
                 activeBody.blueprint.forEach(p => { if(p.type==='engine') p.isBurning = false; });
             }
 
-            // Fixed Sensitive Steering (Significantly reduced Angular Velocity application)
+            // Fixed Sensitive Steering
             if (isLaunched) {
                 if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity - 0.0003);
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity + 0.0003);
@@ -445,8 +444,8 @@
                 let zoom = 1 + (Math.max(0, alt) * 0.00005);
                 zoom = Math.min(zoom, 5.0);
                 Render.lookAt(render, {
-                    min: { x: activeBody.position.x - (window.innerWidth/2)*zoom, y: activeShip.position.y - (window.innerHeight/2)*zoom },
-                    max: { x: activeBody.position.x + (window.innerWidth/2)*zoom, y: activeShip.position.y + (window.innerHeight/2)*zoom }
+                    min: { x: activeBody.position.x - (window.innerWidth/2)*zoom, y: activeBody.position.y - (window.innerHeight/2)*zoom },
+                    max: { x: activeBody.position.x + (window.innerWidth/2)*zoom, y: activeBody.position.y + (window.innerHeight/2)*zoom }
                 });
             }
         }
@@ -483,7 +482,7 @@
             let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x);
             let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
 
-            // Manual Planet Render (Avoids Canvas WebGL crash)
+            // Manual Planet Render
             ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); 
             let pScreenX = (0 - bounds.min.x) * scaleX;
             let pScreenY = (0 - bounds.min.y) * scaleY;
