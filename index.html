@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V4 - Graphics & Physics Overhaul</title>
+    <title>Orbital Simulator V4.1 - Perfect Physics</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -51,7 +51,7 @@
 
     <div id="vab-ui" class="panel">
         <h2>Vehicle Assembly</h2>
-        <div class="instruction">Drag parts from the palette to the grid. Click a part to delete it. Middle column is the core. Radials snap to cols 1 and 3.</div>
+        <div class="instruction">Drag parts to the grid. Click a part to delete it. Middle column is the core. Radials snap to cols 1 and 3.</div>
         
         <div class="vab-layout">
             <div class="palette">
@@ -85,17 +85,18 @@
     <div id="controls-help">[W] Throttle | [A/D] Steer | [SPACE] Stage | [M] Map View</div>
 
     <script>
-        // --- 1. PART DATABASE (Fuel 10x, Balanced TWR) ---
+        // --- 1. PART DATABASE ---
+        // Massive fuel boost, strict 1G TWR balance
         const PART_DATA = {
             'pod': { mass: 1.0, fuel: 0, thrust: 0, w: 40, h: 48, type: 'pod' },
             'parachute': { mass: 0.1, fuel: 0, thrust: 0, w: 30, h: 20, type: 'parachute' },
-            'tank': { mass: 0.8, fuel: 20000, thrust: 0, w: 48, h: 48, type: 'tank' },
-            'tank-large': { mass: 1.6, fuel: 40000, thrust: 0, w: 48, h: 98, type: 'tank' },
+            'tank': { mass: 0.8, fuel: 50000, thrust: 0, w: 48, h: 48, type: 'tank' },
+            'tank-large': { mass: 1.6, fuel: 100000, thrust: 0, w: 48, h: 98, type: 'tank' },
             'decoupler': { mass: 0.2, fuel: 0, thrust: 0, w: 48, h: 12, type: 'decoupler' },
             'radial': { mass: 0.2, fuel: 0, thrust: 0, w: 16, h: 40, type: 'radial' },
-            'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.003, drain: 1.5, w: 30, h: 35, type: 'engine' }, 
-            'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.009, drain: 6.0, w: 40, h: 45, type: 'engine' }, 
-            'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.022, drain: 18.0, w: 48, h: 55, type: 'engine' }  
+            'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.0015, drain: 1.5, w: 30, h: 35, type: 'engine' }, 
+            'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.005, drain: 6.0, w: 40, h: 45, type: 'engine' }, 
+            'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.012, drain: 18.0, w: 48, h: 55, type: 'engine' }  
         };
 
         // --- 2. VAB GRID LOGIC (5x12) ---
@@ -172,7 +173,9 @@
         const Engine = Matter.Engine, Render = Matter.Render, Runner = Matter.Runner,
               Bodies = Matter.Bodies, Body = Matter.Body, Composite = Matter.Composite, Vector = Matter.Vector;
 
-        const PLANET_RADIUS = 500000, PLANET_POS = { x: 0, y: 0 }, ATMOSPHERE_HEIGHT = 50000, GRAVITY_CONSTANT = 10000000000; 
+        // NEW SCALE: 1.5 Million radius. Forces a realistic orbital insertion curve.
+        // G-Constant perfectly calibrated to exactly 0.001 (1G) at surface to prevent tunneling.
+        const PLANET_RADIUS = 1500000, PLANET_POS = { x: 0, y: 0 }, ATMOSPHERE_HEIGHT = 100000, GRAVITY_CONSTANT = 2250000000; 
         
         let engine, render, runner;
         let mode = 'build', keys = {}, isLaunched = false, isMapView = false;
@@ -199,7 +202,7 @@
         }
 
         function buildPhysicsWorld() {
-            engine = Engine.create({ positionIterations: 12, velocityIterations: 12 });
+            engine = Engine.create({ positionIterations: 16, velocityIterations: 16 });
             engine.gravity.scale = 0; 
             render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }});
             
@@ -458,7 +461,7 @@
             let px = activeBody.position.x, py = activeBody.position.y, vx = activeBody.velocity.x, vy = activeBody.velocity.y;
             let dt = 30; // Fast forward
             
-            for (let i = 0; i < 20000; i++) { // Project 600,000 frames into future
+            for (let i = 0; i < 30000; i++) { 
                 if(i % 15 === 0) points.push({ x: px, y: py });
                 let r2 = px*px + py*py, r = Math.sqrt(r2);
                 if (r < PLANET_RADIUS) { points.push({ x: px, y: py }); break; }
@@ -531,7 +534,8 @@
                 } else if (isMapView) return;
 
                 body.parts.forEach((sub, i) => {
-                    if (i === 0 && body.parts.length > 1) return; // Skip Matter.js hull bounds
+                    // Critical fix: Matter.js groups all parts into a master body at index 0. We MUST skip it or partData will be undefined.
+                    if (i === 0 && body.parts.length > 1) return; 
                     let d = sub.partData; if(!d) return;
 
                     ctx.save();
