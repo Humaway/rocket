@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Keplerian Physics</title>
+    <title>Orbital Rocket Simulator - Perfect TWR</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -114,14 +114,13 @@
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
             } else if (type === 'vacuum') {
-                // TWR ~ 0.5. Very low thrust, but extremely efficient fuel usage.
-                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.0005, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
+                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.0015, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
             } else if (type === 'booster') {
-                // TWR ~ 1.3 for medium payloads
-                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.0026, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
+                // Thrust buffed for solid 1.5 TWR on a 2-stage setup
+                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.0055, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
             } else if (type === 'heavy') {
-                // TWR ~ 1.3 for massive multi-stage setups. High fuel consumption.
-                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.0058, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
+                // Thrust buffed to lift massive heavy payloads
+                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.012, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
             }
             
             rocketParts.push(JSON.parse(JSON.stringify(part)));
@@ -320,12 +319,16 @@
 
             // 1. Radial Gravity
             let allBodies = [activeShip, ...debrisBodies];
+            let currentShipDist = 0;
+
             allBodies.forEach(body => {
                 if(!body) return;
                 let dir = Vector.sub(PLANET_POS, body.position);
                 let distSq = (dir.x * dir.x) + (dir.y * dir.y);
                 let dist = Math.sqrt(distSq);
                 
+                if (body === activeShip) currentShipDist = dist;
+
                 if (isLaunched && dist > PLANET_RADIUS) {
                     let forceMag = (GRAVITY_CONSTANT * body.mass) / distSq;
                     let force = Vector.mult(Vector.normalise(dir), forceMag);
@@ -338,11 +341,11 @@
                 if (body === activeShip) atmoPercentDisplay = Math.floor(atmoDensity * 100);
 
                 if(body.partsData && body.partsData[0].type !== 'parachute') {
-                    Body.set(body, 'frictionAir', 0.01 * atmoDensity);
+                    Body.set(body, 'frictionAir', 0.01 * atmoDensity); 
                 }
             });
 
-            // 2. Stage-Isolated Fuel Drain
+            // 2. Isolated Fuel Drain
             let stageStartIndex = 0;
             let stageEndIndex = activeShip.partsData.length - 1;
 
@@ -387,8 +390,8 @@
 
             // 3. Steering Control
             if (isLaunched) {
-                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity - 0.0006);
-                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006);
+                if (keys['KeyA'] || keys['ArrowLeft']) { Body.setAngularVelocity(activeShip, activeShip.angularVelocity - 0.0006); }
+                if (keys['KeyD'] || keys['ArrowRight']) { Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006); }
             }
 
             // 4. Calculate Telemetry 
@@ -404,9 +407,8 @@
                 }
             }
 
-            let currentDist = Vector.magnitude(Vector.sub(PLANET_POS, activeShip.position));
-            let altitudeRaw = currentDist - PLANET_RADIUS;
-            let speedRaw = Vector.magnitude(activeShip.velocity) * 5; // Visual speed multiplier
+            let altitudeRaw = currentShipDist - PLANET_RADIUS;
+            let speedRaw = Vector.magnitude(activeShip.velocity) * 5;
             let fuelPercentage = stageFuelMax > 0 ? Math.max(0, Math.floor((stageFuelRemaining / stageFuelMax) * 100)) : 0;
 
             document.getElementById('tel-alt').innerText = (altitudeRaw / 100).toFixed(2) + ' km';
@@ -427,7 +429,6 @@
                 let dy = Math.abs(activeShip.position.y - PLANET_POS.y);
                 let shipDist = Math.sqrt(dx*dx + dy*dy);
                 
-                // Allow dynamic zoom to frame both planet and ship
                 mapCameraViewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.5; 
                 
                 Render.lookAt(render, {
@@ -455,11 +456,9 @@
             let v2 = vx*vx + vy*vy;
             let r_dot_v = rx*vx + ry*vy;
 
-            // Specific orbital energy
             let epsilon = (v2 / 2) - (mu / r);
             let a = -mu / (2 * epsilon);
 
-            // Eccentricity vector
             let ex = ( (v2 - mu/r)*rx - r_dot_v*vx ) / mu;
             let ey = ( (v2 - mu/r)*ry - r_dot_v*vy ) / mu;
             let e = Math.sqrt(ex*ex + ey*ey);
@@ -468,15 +467,13 @@
             let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
             
             ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0); // Lock to monitor pixels
-            ctx.strokeStyle = 'rgba(0, 200, 255, 0.9)'; // Bright Cyan
+            ctx.setTransform(1, 0, 0, 1, 0, 0); 
+            ctx.strokeStyle = 'rgba(0, 200, 255, 0.9)'; 
             ctx.lineWidth = 3; 
 
             if (e < 1 && a > 0) {
                 // ELLIPSE (Stable Orbit)
                 let b = a * Math.sqrt(1 - e*e);
-                
-                // Center of ellipse is offset from focus by -a*e in direction of periapsis
                 let cx = planetPos.x - a * ex;
                 let cy = planetPos.y - a * ey;
                 let angle = Math.atan2(ey, ex);
@@ -491,7 +488,6 @@
                 ctx.stroke();
             } else {
                 // HYPERBOLA (Escape Trajectory)
-                // We use a small, safe numeric integrator just to draw the escape path
                 ctx.beginPath();
                 let simX = ship.position.x;
                 let simY = ship.position.y;
@@ -510,7 +506,7 @@
                     let distSq = dirX*dirX + dirY*dirY;
                     let dist = Math.sqrt(distSq);
                     
-                    if (dist > PLANET_RADIUS * 6) break; // Escaped view
+                    if (dist > PLANET_RADIUS * 6) break; 
 
                     let forceMag = mu / distSq;
                     simVx += (dirX/dist) * forceMag * dt;
@@ -530,12 +526,12 @@
             let scaleX = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
             let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
 
-            // 1. Draw True Mathematical Orbit (Only in Map View)
+            // 1. Draw True Mathematical Orbit
             if (isMapView && isLaunched && activeShip) {
                 drawKeplerOrbit(ctx, activeShip, PLANET_POS, GRAVITY_CONSTANT);
             }
 
-            // 2. Draw Historical Trail (Faded Red)
+            // 2. Draw Historical Trail
             let currentScale = isMapView ? (mapCameraViewSpan * 2) : (render.bounds.max.x - render.bounds.min.x);
             let baseScale = window.innerWidth;
             let histLineWidth = isMapView ? Math.max(15, (currentScale / baseScale) * 8) : Math.max(3, (currentScale / baseScale) * 3);
@@ -560,7 +556,6 @@
                 
                 let markerSize = 15; 
                 
-                // Cyan Halo
                 ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
                 ctx.beginPath();
                 ctx.arc(0, 0, markerSize * 2, 0, 2*Math.PI);
@@ -568,7 +563,6 @@
 
                 ctx.rotate(activeShip.angle);
                 
-                // Neon Ship Icon
                 ctx.fillStyle = '#00ffcc';
                 ctx.beginPath();
                 ctx.moveTo(0, -markerSize); 
@@ -577,7 +571,6 @@
                 ctx.closePath();
                 ctx.fill();
                 
-                // Map Exhaust Fire
                 if (isEngineBurning) {
                     ctx.fillStyle = '#ff4400';
                     ctx.beginPath();
