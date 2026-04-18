@@ -33,6 +33,9 @@
 
         #controls-help { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 20px; font-size: 0.9rem; display: none; color: #ccc; z-index: 10; border: 1px solid #4da8da; }
         .bp-part { border: 1px solid rgba(255,255,255,0.2); width: 100%; text-align: center; font-size: 0.6rem; display: flex; align-items: center; justify-content: center; }
+        
+        #clamp-warning { color: #eab308; font-weight: bold; font-size: 0.9rem; text-align: center; margin-top: 10px; display: none; animation: blink 1s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -60,6 +63,7 @@
         <div class="telemetry-row"><span class="telemetry-label">ALTITUDE</span><span id="tel-alt">0 km</span></div>
         <div class="telemetry-row"><span class="telemetry-label">SPEED</span><span id="tel-spd">0 m/s</span></div>
         <div class="telemetry-row"><span class="telemetry-label">FUEL</span><span id="tel-fuel">100%</span></div>
+        <div id="clamp-warning">CLAMPS ENGAGED<br><span style="font-size:0.75rem; color:#aaa;">Press [W] to Release & Ignite</span></div>
     </div>
 
     <div id="controls-help">[W/UP] Thrust | [A/D] Steer | [SPACE] Stage | [M] Map View</div>
@@ -78,16 +82,17 @@
         
         let physicalBodies = [];
         let constraints = [];
+        let launchClamps = [];
         let activeEngineIndex = -1;
         let totalFuel = 0; let currentFuel = 0;
         let currentStageIndex = 0;
         
-        // Orbital Mechanics Variables
+        // Orbital Mechanics Variables (Planet scaled up!)
         let planetBody;
-        const PLANET_RADIUS = 3000;
+        const PLANET_RADIUS = 6000; 
         const PLANET_POS = { x: 0, y: 0 }; 
-        const GRAVITY_CONSTANT = 1500000; 
-        const ATMOSPHERE_HEIGHT = 1500;
+        const GRAVITY_CONSTANT = 3000000; 
+        const ATMOSPHERE_HEIGHT = 3000;
         
         // Map View & Trajectory
         let isMapView = false;
@@ -152,6 +157,7 @@
             document.getElementById('build-ui').style.display = 'none';
             document.getElementById('flight-ui').style.display = 'flex';
             document.getElementById('controls-help').style.display = 'block';
+            document.getElementById('clamp-warning').style.display = 'block';
             currentFuel = totalFuel;
             initPhysics();
         }
@@ -165,21 +171,21 @@
                 options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#050814' }
             });
 
-            // Create Globe at (0,0)
+            // Create Globe
             planetBody = Bodies.circle(PLANET_POS.x, PLANET_POS.y, PLANET_RADIUS, { 
                 isStatic: true, friction: 1, 
                 render: { fillStyle: '#1a3627', strokeStyle: '#2a5c41', lineWidth: 5 } 
             });
             
-            // Create a flat launchpad at the North Pole
-            let launchpad = Bodies.rectangle(0, -PLANET_RADIUS, 150, 20, {
+            // Create a wider launchpad
+            let launchpad = Bodies.rectangle(0, -PLANET_RADIUS - 10, 250, 20, {
                 isStatic: true, friction: 1, render: { fillStyle: '#4a5568' }
             });
             
             Composite.add(engine.world, [planetBody, launchpad]);
 
             // Spawn rocket directly above the launchpad
-            let startY = -PLANET_RADIUS - 10; // Rest exactly on the pad
+            let startY = -PLANET_RADIUS - 20; // Rest exactly on the pad
             let currentY = startY;
 
             for (let i = rocketParts.length - 1; i >= 0; i--) {
@@ -193,30 +199,40 @@
                 currentY -= part.height;
             }
 
-            // Stiff Constraints using Exact Geometry (Anti-Snap Fix)
+            // Stiff Constraints using Exact Geometry
             for (let i = 0; i < rocketParts.length - 1; i++) {
                 let top = physicalBodies[i]; 
                 let bottom = physicalBodies[i+1];
                 let jointWidth = Math.min(top.partData.width, bottom.partData.width) / 2 - 2;
 
-                // Explicit geometric offsets relative to the center of the part
                 let cLeft = Constraint.create({ 
-                    bodyA: top, bodyB: bottom, 
-                    pointA: { x: -jointWidth, y: top.partData.height / 2 }, 
-                    pointB: { x: -jointWidth, y: -bottom.partData.height / 2 }, 
-                    stiffness: 1, length: 0, render: { visible: false } 
+                    bodyA: top, bodyB: bottom, pointA: { x: -jointWidth, y: top.partData.height / 2 }, pointB: { x: -jointWidth, y: -bottom.partData.height / 2 }, stiffness: 1, length: 0, render: { visible: false } 
                 });
                 let cRight = Constraint.create({ 
-                    bodyA: top, bodyB: bottom, 
-                    pointA: { x: jointWidth, y: top.partData.height / 2 }, 
-                    pointB: { x: jointWidth, y: -bottom.partData.height / 2 }, 
-                    stiffness: 1, length: 0, render: { visible: false } 
+                    bodyA: top, bodyB: bottom, pointA: { x: jointWidth, y: top.partData.height / 2 }, pointB: { x: jointWidth, y: -bottom.partData.height / 2 }, stiffness: 1, length: 0, render: { visible: false } 
                 });
                 
                 cLeft.jointIndex = i; cRight.jointIndex = i;
                 constraints.push(cLeft, cRight);
                 Composite.add(engine.world, [cLeft, cRight]);
             }
+
+            // --- LAUNCH CLAMPS ---
+            // Securely fasten the bottom part of the rocket to the launchpad so it cannot tip over.
+            let bottomPart = physicalBodies[physicalBodies.length - 1];
+            let clampWidth = bottomPart.partData.width / 2;
+            let clampLeft = Constraint.create({
+                bodyA: launchpad, bodyB: bottomPart,
+                pointA: { x: -clampWidth, y: -10 }, pointB: { x: -clampWidth, y: bottomPart.partData.height / 2 },
+                stiffness: 1, length: 0, render: { strokeStyle: '#ffaa00', lineWidth: 4 }
+            });
+            let clampRight = Constraint.create({
+                bodyA: launchpad, bodyB: bottomPart,
+                pointA: { x: clampWidth, y: -10 }, pointB: { x: clampWidth, y: bottomPart.partData.height / 2 },
+                stiffness: 1, length: 0, render: { strokeStyle: '#ffaa00', lineWidth: 4 }
+            });
+            launchClamps.push(clampLeft, clampRight);
+            Composite.add(engine.world, launchClamps);
 
             updateActiveEngine();
             Render.run(render);
@@ -282,7 +298,6 @@
             // 1. Radial Orbital Gravity
             physicalBodies.forEach(body => {
                 if(!body) return;
-                
                 let dir = Vector.sub(PLANET_POS, body.position);
                 let distSq = (dir.x * dir.x) + (dir.y * dir.y);
                 let dist = Math.sqrt(distSq);
@@ -300,8 +315,15 @@
                 }
             });
 
-            // 2. Thrust Control
+            // 2. Thrust & Launch Clamps
             if ((keys['KeyW'] || keys['ArrowUp']) && currentFuel > 0 && activeEngineIndex !== -1) {
+                // Release clamps on first thrust
+                if (launchClamps.length > 0) {
+                    Composite.remove(engine.world, launchClamps);
+                    launchClamps = [];
+                    document.getElementById('clamp-warning').style.display = 'none';
+                }
+
                 let engine = physicalBodies[activeEngineIndex];
                 if (engine) {
                     let force = { x: engine.partData.thrust * Math.sin(engine.angle), y: -engine.partData.thrust * Math.cos(engine.angle) };
@@ -313,8 +335,11 @@
             // 3. Steering Control
             let steerBody = physicalBodies.find(b => b && b.partData.type === 'pod');
             if (steerBody) {
-                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity - 0.002);
-                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity + 0.002);
+                // Only allow steering if clamps are detached
+                if (launchClamps.length === 0) {
+                    if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity - 0.002);
+                    if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity + 0.002);
+                }
             }
 
             // 4. Telemetry
@@ -328,7 +353,7 @@
 
             // 5. Track Trajectory
             tickCounter++;
-            if(tickCounter % 10 === 0) {
+            if(tickCounter % 10 === 0 && launchClamps.length === 0) {
                 trajectory.push({x: pod.position.x, y: pod.position.y});
                 if(trajectory.length > 500) trajectory.shift(); 
             }
