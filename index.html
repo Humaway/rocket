@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Heavy Lift</title>
+    <title>Orbital Rocket Simulator - Stage Isolation & Map Fix</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -100,6 +100,7 @@
         let isMapView = false;
         let trajectory = [];
         let tickCounter = 0;
+        let mapCameraViewSpan = PLANET_RADIUS * 1.3; // Track explicitly for rendering
 
         updateUI();
 
@@ -118,7 +119,6 @@
             } else if (type === 'booster') {
                 part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.006, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
             } else if (type === 'heavy') {
-                // The Heavy Lifter: Massive thrust for huge multi-stage rockets, extremely thirsty.
                 part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.018, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
             }
             
@@ -333,7 +333,27 @@
                 }
             });
 
-            // 2. Thrust & Individualized Fuel Drain
+            // --- STAGE ISOLATION LOGIC ---
+            // Find the boundaries of the current stage so the engine only drinks its own fuel
+            let stageStartIndex = 0;
+            let stageEndIndex = activeShip.partsData.length - 1;
+
+            if (activeEngineLocalIndex !== -1) {
+                // Find decoupler above engine
+                for (let i = activeEngineLocalIndex; i >= 0; i--) {
+                    if (activeShip.partsData[i].type === 'decoupler') {
+                        stageStartIndex = i + 1; break;
+                    }
+                }
+                // Find decoupler below engine (rare, but mathematically safe)
+                for (let i = activeEngineLocalIndex; i < activeShip.partsData.length; i++) {
+                    if (activeShip.partsData[i].type === 'decoupler') {
+                        stageEndIndex = i - 1; break;
+                    }
+                }
+            }
+
+            // 2. Thrust & Isolated Fuel Drain
             if ((keys['KeyW'] || keys['ArrowUp']) && activeEngineLocalIndex !== -1) {
                 initiateLaunchSequence();
                 let engineData = activeShip.partsData[activeEngineLocalIndex];
@@ -341,7 +361,8 @@
                 let fuelToDrain = engineData.fuelDrain || 1.0;
                 let hasDrainedFuel = false;
 
-                for(let i = activeShip.partsData.length - 1; i >= 0; i--) {
+                // Only search within the isolated stage bounds
+                for(let i = stageEndIndex; i >= stageStartIndex; i--) {
                     let p = activeShip.partsData[i];
                     if(p.type === 'tank' && p.fuelRemaining > 0) {
                         if(p.fuelRemaining >= fuelToDrain) {
@@ -370,15 +391,18 @@
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006);
             }
 
-            // 4. Calculate Telemetry 
+            // 4. Calculate Telemetry (Isolated to Stage)
             let stageFuelMax = 0;
             let stageFuelRemaining = 0;
-            activeShip.partsData.forEach(p => {
-                if(p.type === 'tank') {
-                    stageFuelMax += p.fuelCapacity;
-                    stageFuelRemaining += p.fuelRemaining;
+            if (activeEngineLocalIndex !== -1) {
+                for(let i = stageStartIndex; i <= stageEndIndex; i++) {
+                    let p = activeShip.partsData[i];
+                    if(p.type === 'tank') {
+                        stageFuelMax += p.fuelCapacity;
+                        stageFuelRemaining += p.fuelRemaining;
+                    }
                 }
-            });
+            }
 
             let currentDist = Vector.magnitude(Vector.sub(PLANET_POS, activeShip.position));
             let altitudeRaw = currentDist - PLANET_RADIUS;
@@ -392,7 +416,7 @@
 
             // 5. Track Trajectory
             tickCounter++;
-            if(tickCounter % 30 === 0 && isLaunched) {
+            if(tickCounter % 10 === 0 && isLaunched) {
                 trajectory.push({x: activeShip.position.x, y: activeShip.position.y});
                 if(trajectory.length > 5000) trajectory.shift(); 
             }
@@ -402,11 +426,13 @@
                 let dx = Math.abs(activeShip.position.x - PLANET_POS.x);
                 let dy = Math.abs(activeShip.position.y - PLANET_POS.y);
                 let shipDist = Math.sqrt(dx*dx + dy*dy);
-                let viewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.3; 
+                
+                // Explicitly define and store mapCameraViewSpan for the render loop
+                mapCameraViewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.3; 
                 
                 Render.lookAt(render, {
-                    min: { x: PLANET_POS.x - viewSpan, y: PLANET_POS.y - viewSpan },
-                    max: { x: PLANET_POS.x + viewSpan, y: PLANET_POS.y + viewSpan }
+                    min: { x: PLANET_POS.x - mapCameraViewSpan, y: PLANET_POS.y - mapCameraViewSpan },
+                    max: { x: PLANET_POS.x + mapCameraViewSpan, y: PLANET_POS.y + mapCameraViewSpan }
                 });
             } else {
                 let targetZoom = 1 + (Math.max(0, altitudeRaw) * 0.0001);
@@ -422,10 +448,9 @@
             if (mode !== 'flight') return;
             const ctx = render.context;
             
-            let currentScale = render.bounds.max.x - render.bounds.min.x;
-            let baseScale = window.innerWidth;
-            
-            let dynamicLineWidth = isMapView ? Math.max(40, (currentScale / baseScale) * 15) : Math.max(5, (currentScale / baseScale) * 5);
+            // Explicit screen scaling to guarantee map visibility
+            let currentScale = isMapView ? (mapCameraViewSpan * 2) : (render.bounds.max.x - render.bounds.min.x);
+            let dynamicLineWidth = isMapView ? currentScale * 0.003 : currentScale * 0.005; 
 
             if (trajectory.length > 1) {
                 ctx.beginPath();
@@ -437,12 +462,20 @@
             }
 
             if (isMapView && activeShip) {
-                let markerSize = currentScale * 0.015; 
+                let markerSize = currentScale * 0.015; // 1.5% of total view width
                 
                 ctx.save();
                 ctx.translate(activeShip.position.x, activeShip.position.y);
+                
+                // Draw a highly visible massive halo around the ship
+                ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
+                ctx.beginPath();
+                ctx.arc(0, 0, markerSize * 2, 0, 2*Math.PI);
+                ctx.fill();
+
                 ctx.rotate(activeShip.angle);
                 
+                // Draw Cyan Triangle
                 ctx.fillStyle = '#00ffcc';
                 ctx.beginPath();
                 ctx.moveTo(0, -markerSize); 
