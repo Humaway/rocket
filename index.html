@@ -3,28 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Circular Orbits</title>
+    <title>Orbital Rocket Simulator - High Power & Fixed Orbit</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
         .panel { position: absolute; background: rgba(10, 15, 25, 0.9); border: 1px solid #334; border-radius: 8px; padding: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); backdrop-filter: blur(4px); z-index: 10; }
+        
         #build-ui { top: 20px; left: 20px; width: 350px; display: flex; flex-direction: column; gap: 10px; }
         #flight-ui { top: 20px; right: 20px; width: 250px; display: none; flex-direction: column; gap: 15px; }
+        
         h2, h3 { margin: 0 0 10px 0; font-size: 1.2rem; color: #4da8da; letter-spacing: 1px; }
+        
         .btn { background: #1e293b; color: white; border: 1px solid #4da8da; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; }
         .btn:hover { background: #4da8da; color: #000; }
         .btn-launch { background: #28a745; border-color: #28a745; margin-top: 10px; }
         .btn-launch:hover { background: #218838; color: white; }
+        .btn-map { background: #eab308; border-color: #ca8a04; color: black; }
+
         .build-container { display: flex; gap: 15px; }
         .controls-col { flex: 1; display: flex; flex-direction: column; gap: 8px; }
         .visualizer-col { width: 80px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-height: 250px; background: rgba(0,0,0,0.5); border: 1px dashed #556; padding: 5px; }
+        
         #stage-list { background: rgba(0,0,0,0.5); border-radius: 4px; padding: 10px; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
         .stage-item { background: #0f172a; padding: 5px; border-radius: 3px; font-size: 0.85rem; }
         .stage-active { border-left: 3px solid #28a745; background: #1e293b; }
+
         .telemetry-row { display: flex; justify-content: space-between; border-bottom: 1px solid #334; padding-bottom: 5px; font-family: monospace; font-size: 1.1rem; }
         .telemetry-label { color: #8892b0; font-size: 0.9rem;}
+
         #controls-help { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 20px; font-size: 0.9rem; display: none; color: #ccc; z-index: 10; border: 1px solid #4da8da; }
         .bp-part { border: 1px solid rgba(255,255,255,0.2); width: 100%; text-align: center; font-size: 0.6rem; display: flex; align-items: center; justify-content: center; }
+        
+        #clamp-warning { color: #eab308; font-weight: bold; font-size: 0.9rem; text-align: center; margin-top: 10px; display: none; animation: blink 1s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -55,6 +66,7 @@
         <div class="telemetry-row"><span class="telemetry-label">SPEED</span><span id="tel-spd">0 m/s</span></div>
         <div class="telemetry-row"><span class="telemetry-label">ATMO DENSITY</span><span id="tel-atmo">100%</span></div>
         <div class="telemetry-row" style="margin-top: 10px;"><span class="telemetry-label">STAGE FUEL</span><span id="tel-fuel">100%</span></div>
+        <div id="clamp-warning">SYSTEMS READY<br><span style="font-size:0.75rem; color:#aaa;">Ignite with [W] or [SPACE]</span></div>
     </div>
 
     <div id="controls-help">[W/UP] Thrust | [A/D] Steer | [SPACE] Stage | [M] Map View</div>
@@ -65,12 +77,26 @@
               Vector = Matter.Vector, Events = Matter.Events;
 
         let engine, render, runner;
-        let mode = 'build', keys = {}, isLaunched = false, isMapView = false;
-        let podPart = { type: 'pod', name: 'Cmd Pod', mass: 0.5, height: 40, width: 30, color: '#dddddd' };
-        let rocketParts = [podPart], activeShip, debrisBodies = [], activeEngineLocalIndex = -1, currentStageIndex = 0;
+        let mode = 'build';
+        let keys = {};
         
-        const PLANET_RADIUS = 500000, PLANET_POS = { x: 0, y: 0 }, GRAVITY_CONSTANT = 250000000, ATMOSPHERE_HEIGHT = 50000;
-        let mapCameraViewSpan = PLANET_RADIUS * 1.5;
+        const podPart = { type: 'pod', name: 'Cmd Pod', mass: 0.5, height: 40, width: 30, color: '#dddddd' };
+        let rocketParts = [podPart];
+        
+        let activeShip; 
+        let debrisBodies = []; 
+        
+        let activeEngineLocalIndex = -1;
+        let currentStageIndex = 0;
+        let isLaunched = false;
+        
+        const PLANET_RADIUS = 500000; 
+        const PLANET_POS = { x: 0, y: 0 }; 
+        const GRAVITY_CONSTANT = 250000000; 
+        const ATMOSPHERE_HEIGHT = 50000; 
+        
+        let isMapView = false;
+        let mapCameraViewSpan = PLANET_RADIUS * 1.3; 
 
         updateUI();
 
@@ -85,12 +111,13 @@
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
             } else if (type === 'vacuum') {
-                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.012, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
+                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.01, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
             } else if (type === 'booster') {
-                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.055, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
+                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.05, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
             } else if (type === 'heavy') {
-                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.14, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
+                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.1, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
             }
+            
             rocketParts.push(JSON.parse(JSON.stringify(part)));
             updateUI();
         }
@@ -109,7 +136,8 @@
             });
             const list = document.getElementById('stage-list');
             list.innerHTML = '';
-            rocketParts.slice().reverse().forEach((part, idx) => {
+            let stages = rocketParts.slice().reverse(); 
+            stages.forEach((part, idx) => {
                 let realIndex = rocketParts.length - 1 - idx;
                 let div = document.createElement('div'); div.className = `stage-item`; div.id = `stage-ui-${realIndex}`;
                 div.innerHTML = `<span>[Stage ${idx + 1}] ${part.name}</span>`;
@@ -125,9 +153,12 @@
         }
 
         function createShipCompound(partsData) {
-            let bodies = [], currentY = 0, totalMass = 0;
+            let bodies = [];
+            let currentY = 0;
+            let totalMass = 0;
             for (let i = 0; i < partsData.length; i++) {
-                let p = partsData[i], b = Bodies.rectangle(0, currentY + p.height / 2, p.width, p.height, { render: { fillStyle: p.color }});
+                let p = partsData[i];
+                let b = Bodies.rectangle(0, currentY + p.height / 2, p.width, p.height, { render: { fillStyle: p.color }});
                 b.partData = p; bodies.push(b); currentY += p.height; totalMass += p.mass;
             }
             let compound = Body.create({ parts: bodies, mass: totalMass, frictionAir: 0.00 }); 
@@ -140,28 +171,44 @@
             document.getElementById('build-ui').style.display = 'none';
             document.getElementById('flight-ui').style.display = 'flex';
             document.getElementById('controls-help').style.display = 'block';
+            document.getElementById('clamp-warning').style.display = 'block';
+            isLaunched = false;
             initPhysics();
         }
 
         function initPhysics() {
             engine = Engine.create({ positionIterations: 16, velocityIterations: 16 });
             engine.gravity.scale = 0; 
-            render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }});
-            planetBody = Bodies.circle(PLANET_POS.x, PLANET_POS.y, PLANET_RADIUS, { isStatic: true, friction: 1, render: { fillStyle: '#111', strokeStyle: '#222', lineWidth: 10 } });
-            let pad = Bodies.rectangle(0, -PLANET_RADIUS - 10, 1000, 20, { isStatic: true, friction: 1, render: { fillStyle: '#333' }});
-            Composite.add(engine.world, [planetBody, pad]);
-            activeShip = createShipCompound(JSON.parse(JSON.stringify(rocketParts)));
-            Body.setPosition(activeShip, {x: 0, y: -PLANET_RADIUS - 20 - (activeShip.bounds.max.y - activeShip.bounds.min.y)/2});
+            render = Render.create({
+                element: document.body, engine: engine,
+                options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }
+            });
+            planetBody = Bodies.circle(PLANET_POS.x, PLANET_POS.y, PLANET_RADIUS, { 
+                isStatic: true, friction: 1, render: { fillStyle: '#0d1a13', strokeStyle: '#1c402d', lineWidth: 10 } 
+            });
+            let launchpad = Bodies.rectangle(0, -PLANET_RADIUS - 10, 800, 20, {
+                isStatic: true, friction: 1, render: { fillStyle: '#333b4d' }
+            });
+            Composite.add(engine.world, [planetBody, launchpad]);
+            let liveParts = JSON.parse(JSON.stringify(rocketParts));
+            activeShip = createShipCompound(liveParts);
+            let startY = -PLANET_RADIUS - 20 - (activeShip.bounds.max.y - activeShip.bounds.min.y)/2;
+            Body.setPosition(activeShip, {x: 0, y: startY});
             Body.setStatic(activeShip, true); 
             Composite.add(engine.world, activeShip);
             updateActiveEngine();
-            Render.run(render); runner = Runner.create(); Runner.run(runner, engine);
-            Events.on(engine, 'beforeUpdate', gameLoop); Events.on(render, 'afterRender', customRender);
+            Render.run(render);
+            runner = Runner.create();
+            Runner.run(runner, engine);
+            Events.on(engine, 'beforeUpdate', gameLoop);
+            Events.on(render, 'afterRender', customRender);
         }
 
         function updateActiveEngine() {
             activeEngineLocalIndex = -1;
-            for (let i = activeShip.partsData.length - 1; i >= 0; i--) { if (activeShip.partsData[i].type === 'engine') { activeEngineLocalIndex = i; break; } }
+            for (let i = activeShip.partsData.length - 1; i >= 0; i--) {
+                if (activeShip.partsData[i].type === 'engine') { activeEngineLocalIndex = i; break; }
+            }
         }
 
         window.addEventListener('keydown', (e) => {
@@ -171,27 +218,59 @@
         });
         window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
-        function toggleMap() { isMapView = !isMapView; document.getElementById('map-toggle').innerText = isMapView ? "[M] MAP VIEW: ON" : "[M] MAP VIEW: OFF"; }
+        function toggleMap() {
+            isMapView = !isMapView;
+            let btn = document.getElementById('map-toggle');
+            btn.innerText = isMapView ? "[M] MAP VIEW: ON" : "[M] MAP VIEW: OFF";
+            btn.style.background = isMapView ? "#22c55e" : "#eab308";
+        }
+
+        function initiateLaunchSequence() {
+            if (!isLaunched) {
+                isLaunched = true;
+                Body.setStatic(activeShip, false); 
+                document.getElementById('clamp-warning').style.display = 'none';
+            }
+        }
 
         function stageRocket() {
-            if (!isLaunched) { isLaunched = true; Body.setStatic(activeShip, false); }
+            initiateLaunchSequence(); 
             if (currentStageIndex < 0) return;
             while (currentStageIndex >= 0) {
-                let part = activeShip.partsData[currentStageIndex];
-                document.getElementById(`stage-ui-${currentStageIndex}`).style.opacity = '0.3';
-                if (part.type === 'parachute') { Body.set(activeShip, 'frictionAir', 0.8); currentStageIndex--; break; }
-                if (part.type === 'decoupler') {
-                    let topData = activeShip.partsData.slice(0, currentStageIndex), bottomData = activeShip.partsData.slice(currentStageIndex);
-                    let oldAngle = activeShip.angle, oldVel = activeShip.velocity, oldPodPos = { x: activeShip.parts[1].position.x, y: activeShip.parts[1].position.y };
+                let stagePartData = activeShip.partsData[currentStageIndex];
+                let uiEl = document.getElementById(`stage-ui-${currentStageIndex}`);
+                if(uiEl) uiEl.style.opacity = '0.3';
+                if (stagePartData.type === 'parachute') {
+                    Body.set(activeShip, 'frictionAir', 0.8); 
+                    activeShip.parts[1].render.fillStyle = '#ffffff'; 
+                    currentStageIndex--; break;
+                } else if (stagePartData.type === 'decoupler') {
+                    let splitIdx = currentStageIndex;
+                    let topData = activeShip.partsData.slice(0, splitIdx);
+                    let bottomData = activeShip.partsData.slice(splitIdx);
+                    let oldAngle = activeShip.angle;
+                    let oldVel = activeShip.velocity;
+                    let oldAngVel = activeShip.angularVelocity;
+                    let oldPodWorldPos = { x: activeShip.parts[1].position.x, y: activeShip.parts[1].position.y };
+                    let oldDebrisWorldPos = { x: activeShip.parts[splitIdx + 1].position.x, y: activeShip.parts[splitIdx + 1].position.y };
                     Composite.remove(engine.world, activeShip);
                     activeShip = createShipCompound(topData);
-                    Body.setPosition(activeShip, oldPodPos); Body.setAngle(activeShip, oldAngle); Body.setVelocity(activeShip, oldVel);
+                    let newPodLocalOffset = Vector.sub(activeShip.parts[1].position, activeShip.position);
+                    let rotatedPodOffset = Vector.rotate(newPodLocalOffset, oldAngle);
+                    Body.setPosition(activeShip, Vector.sub(oldPodWorldPos, rotatedPodOffset));
+                    Body.setAngle(activeShip, oldAngle); Body.setVelocity(activeShip, oldVel); Body.setAngularVelocity(activeShip, oldAngVel);
                     Composite.add(engine.world, activeShip);
-                    let debris = createShipCompound(bottomData); Body.setPosition(debris, oldPodPos); Body.setAngle(debris, oldAngle); Body.setVelocity(debris, oldVel);
+                    let debris = createShipCompound(bottomData);
+                    let newDebrisLocalOffset = Vector.sub(debris.parts[1].position, debris.position);
+                    let rotatedDebrisOffset = Vector.rotate(newDebrisLocalOffset, oldAngle);
+                    Body.setPosition(debris, Vector.sub(oldDebrisWorldPos, rotatedDebrisOffset));
+                    Body.setAngle(debris, oldAngle); Body.setVelocity(debris, oldVel); Body.setAngularVelocity(debris, oldAngVel);
                     Composite.add(engine.world, debris); debrisBodies.push(debris);
+                    let sepForce = 0.005 * activeShip.mass;
+                    Body.applyForce(activeShip, activeShip.position, {x: Math.sin(oldAngle)*sepForce, y: -Math.cos(oldAngle)*sepForce});
+                    Body.applyForce(debris, debris.position, {x: -Math.sin(oldAngle)*sepForce, y: Math.cos(oldAngle)*sepForce});
                     currentStageIndex--; break; 
-                }
-                currentStageIndex--;
+                } else { currentStageIndex--; }
             }
             updateActiveEngine(); highlightCurrentStage();
         }
@@ -199,29 +278,54 @@
         let isEngineBurning = false;
 
         function gameLoop() {
-            if (!activeShip) return;
-            let atmoPercent = 100; isEngineBurning = false;
-            let all = [activeShip, ...debrisBodies];
-            all.forEach(body => {
+            if (mode !== 'flight' || !activeShip) return;
+            let atmoPercentDisplay = 100;
+            isEngineBurning = false;
+            let allBodies = [activeShip, ...debrisBodies];
+            allBodies.forEach(body => {
                 if(!body) return;
-                let dir = Vector.sub(PLANET_POS, body.position), d2 = dir.x*dir.x + dir.y*dir.y, d = Math.sqrt(d2);
-                if (isLaunched && d > PLANET_RADIUS) Body.applyForce(body, body.position, Vector.mult(Vector.normalise(dir), (GRAVITY_CONSTANT * body.mass) / d2));
-                let alt = d - PLANET_RADIUS, dens = Math.max(0, 1 - (alt / ATMOSPHERE_HEIGHT));
-                if (body === activeShip) atmoPercent = Math.floor(dens * 100);
-                if(body.partsData && body.partsData[0].type !== 'parachute') Body.set(body, 'frictionAir', 0.005 * dens);
+                let dir = Vector.sub(PLANET_POS, body.position);
+                let distSq = (dir.x * dir.x) + (dir.y * dir.y);
+                let dist = Math.sqrt(distSq);
+                if (isLaunched && dist > PLANET_RADIUS) {
+                    let forceMag = (GRAVITY_CONSTANT * body.mass) / distSq;
+                    let force = Vector.mult(Vector.normalise(dir), forceMag);
+                    Body.applyForce(body, body.position, force);
+                }
+                let altitude = dist - PLANET_RADIUS;
+                let atmoDensity = Math.max(0, 1 - (altitude / ATMOSPHERE_HEIGHT));
+                if (body === activeShip) atmoPercentDisplay = Math.floor(atmoDensity * 100);
+                if(body.partsData && body.partsData[0].type !== 'parachute') {
+                    Body.set(body, 'frictionAir', 0.01 * atmoDensity);
+                }
             });
 
+            // Fuel & Thrust Logic (Strictly using higher power values)
+            let stageStartIndex = 0;
+            let stageEndIndex = activeShip.partsData.length - 1;
+            if (activeEngineLocalIndex !== -1) {
+                for (let i = activeEngineLocalIndex; i >= 0; i--) {
+                    if (activeShip.partsData[i].type === 'decoupler') { stageStartIndex = i + 1; break; }
+                }
+            }
+
             if ((keys['KeyW'] || keys['ArrowUp']) && activeEngineLocalIndex !== -1) {
-                if (!isLaunched) { isLaunched = true; Body.setStatic(activeShip, false); }
-                let engineData = activeShip.partsData[activeEngineLocalIndex], fuelToDrain = engineData.fuelDrain || 1.0, hasFuel = false;
-                for(let i = activeShip.partsData.length - 1; i >= 0; i--) {
+                initiateLaunchSequence();
+                let engineData = activeShip.partsData[activeEngineLocalIndex];
+                let fuelToDrain = engineData.fuelDrain || 1.0;
+                let hasDrainedFuel = false;
+                for(let i = stageEndIndex; i >= stageStartIndex; i--) {
                     let p = activeShip.partsData[i];
                     if(p.type === 'tank' && p.fuelRemaining > 0) {
-                        let drain = Math.min(p.fuelRemaining, fuelToDrain); p.fuelRemaining -= drain; hasFuel = true; break;
+                        if(p.fuelRemaining >= fuelToDrain) { p.fuelRemaining -= fuelToDrain; fuelToDrain = 0; hasDrainedFuel = true; break; }
+                        else { fuelToDrain -= p.fuelRemaining; p.fuelRemaining = 0; hasDrainedFuel = true; }
                     }
-                    if(p.type === 'decoupler') break;
                 }
-                if (hasFuel) { Body.applyForce(activeShip, activeShip.position, { x: engineData.thrust * Math.sin(activeShip.angle), y: -engineData.thrust * Math.cos(activeShip.angle) }); isEngineBurning = true; }
+                if (hasDrainedFuel) {
+                    let force = { x: engineData.thrust * Math.sin(activeShip.angle), y: -engineData.thrust * Math.cos(activeShip.angle) };
+                    Body.applyForce(activeShip, activeShip.position, force);
+                    isEngineBurning = true;
+                }
             }
 
             if (isLaunched) {
@@ -229,35 +333,69 @@
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006);
             }
 
-            let fuelRemaining = 0, fuelMax = 0;
-            activeShip.partsData.forEach(p => { if(p.type === 'tank') { fuelMax += p.fuelCapacity; fuelRemaining += p.fuelRemaining; }});
-            let d = Vector.magnitude(Vector.sub(PLANET_POS, activeShip.position));
-            document.getElementById('tel-alt').innerText = ((d - PLANET_RADIUS) / 100).toFixed(2) + ' km';
-            document.getElementById('tel-spd').innerText = Math.floor(Vector.magnitude(activeShip.velocity) * 5) + ' m/s';
-            document.getElementById('tel-atmo').innerText = atmoPercent + '%';
-            document.getElementById('tel-fuel').innerText = (fuelMax > 0 ? Math.floor((fuelRemaining / fuelMax) * 100) : 0) + '%';
+            // Telemetry
+            let stageFuelMax = 0, stageFuelRemaining = 0;
+            if (activeEngineLocalIndex !== -1) {
+                for(let i = stageStartIndex; i <= stageEndIndex; i++) {
+                    let p = activeShip.partsData[i];
+                    if(p.type === 'tank') { stageFuelMax += p.fuelCapacity; stageFuelRemaining += p.fuelRemaining; }
+                }
+            }
+            let currentDist = Vector.magnitude(Vector.sub(PLANET_POS, activeShip.position));
+            let altitudeRaw = currentDist - PLANET_RADIUS;
+            let speedRaw = Vector.magnitude(activeShip.velocity) * 5;
+            document.getElementById('tel-alt').innerText = (altitudeRaw / 100).toFixed(2) + ' km';
+            document.getElementById('tel-spd').innerText = Math.floor(speedRaw) + ' m/s';
+            document.getElementById('tel-atmo').innerText = atmoPercentDisplay + '%';
+            document.getElementById('tel-fuel').innerText = (stageFuelMax > 0 ? Math.floor((stageFuelRemaining / stageFuelMax) * 100) : 0) + '%';
 
+            // Camera
             if(isMapView) {
-                mapCameraViewSpan = Math.max(d, PLANET_RADIUS) * 1.5; 
-                Render.lookAt(render, { min: { x: -mapCameraViewSpan, y: -mapCameraViewSpan }, max: { x: mapCameraViewSpan, y: mapCameraViewSpan } });
+                let dx = Math.abs(activeShip.position.x - PLANET_POS.x);
+                let dy = Math.abs(activeShip.position.y - PLANET_POS.y);
+                let shipDist = Math.sqrt(dx*dx + dy*dy);
+                mapCameraViewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.5; 
+                Render.lookAt(render, {
+                    min: { x: PLANET_POS.x - mapCameraViewSpan, y: PLANET_POS.y - mapCameraViewSpan },
+                    max: { x: PLANET_POS.x + mapCameraViewSpan, y: PLANET_POS.y + mapCameraViewSpan }
+                });
             } else {
-                let zoom = 1 + ((d - PLANET_RADIUS) * 0.0001);
-                Render.lookAt(render, { min: { x: activeShip.position.x - (window.innerWidth/2)*zoom, y: activeShip.position.y - (window.innerHeight/2)*zoom }, max: { x: activeShip.position.x + (window.innerWidth/2)*zoom, y: activeShip.position.y + (window.innerHeight/2)*zoom } });
+                let targetZoom = 1 + (Math.max(0, altitudeRaw) * 0.0001);
+                targetZoom = Math.min(targetZoom, 4.0); 
+                Render.lookAt(render, {
+                    min: { x: activeShip.position.x - (window.innerWidth/2) * targetZoom, y: activeShip.position.y - (window.innerHeight/2) * targetZoom },
+                    max: { x: activeShip.position.x + (window.innerWidth/2) * targetZoom, y: activeShip.position.y + (window.innerHeight/2) * targetZoom }
+                });
             }
         }
 
-        function getPrediction() {
-            let path = [], pos = { x: activeShip.position.x, y: activeShip.position.y }, vel = { x: activeShip.velocity.x, y: activeShip.velocity.y }, dt = 50;
-            let startPos = {x: pos.x, y: pos.y};
-            for(let i=0; i<1500; i++) {
-                if (i % 10 === 0) path.push({x: pos.x, y: pos.y});
-                let dx = -pos.x, dy = -pos.y, d2 = dx*dx + dy*dy, d = Math.sqrt(d2);
-                if (d < PLANET_RADIUS) break;
+        // --- THE FIXED FULL-ORBIT PREDICTOR ---
+        function getPredictivePath() {
+            if (!activeShip || !isLaunched) return [];
+            let path = [];
+            let simPos = { x: activeShip.position.x, y: activeShip.position.y };
+            let simVel = { x: activeShip.velocity.x, y: activeShip.velocity.y };
+            let dt = 150; // Massively increased step size to see the curve
+            
+            for(let i=0; i<4000; i++) { // Project millions of pixels forward
+                if (i % 10 === 0) path.push({x: simPos.x, y: simPos.y});
+                
+                let dx = PLANET_POS.x - simPos.x;
+                let dy = PLANET_POS.y - simPos.y;
+                let d2 = dx*dx + dy*dy;
+                let d = Math.sqrt(d2);
+                
+                if (d < PLANET_RADIUS) { path.push({x: simPos.x, y: simPos.y}); break; }
+                
                 let acc = (GRAVITY_CONSTANT) / d2;
-                vel.x += (dx/d) * acc * dt; vel.y += (dy/d) * acc * dt;
-                pos.x += vel.x * dt; pos.y += vel.y * dt;
-                // Close the loop if we return to start
-                if (i > 100 && Vector.magnitude(Vector.sub(pos, startPos)) < 5000) { path.push({x: startPos.x, y: startPos.y}); break; }
+                simVel.x += (dx/d) * acc * dt;
+                simVel.y += (dy/d) * acc * dt;
+                
+                simPos.x += simVel.x * dt;
+                simPos.y += simVel.y * dt;
+                
+                // If it goes too far into deep space, stop drawing
+                if (d > PLANET_RADIUS * 10) break;
             }
             return path;
         }
@@ -265,23 +403,53 @@
         function customRender() {
             if (mode !== 'flight' || !activeShip) return;
             const ctx = render.context;
-            let scale = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
+            let bounds = render.bounds;
+            let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x);
+            let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
+
+            // 1. Draw Path (Strictly Screen Space & Map View Only)
             if (isMapView) {
-                let path = getPrediction();
-                ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.beginPath(); ctx.strokeStyle = '#00ccff'; ctx.lineWidth = 4;
-                path.forEach((p, i) => {
-                    let sx = (p.x - render.bounds.min.x) * scale, sy = (p.y - render.bounds.min.y) * scale;
-                    if(i===0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
-                });
-                ctx.stroke();
-                let sx = (activeShip.position.x - render.bounds.min.x) * scale, sy = (activeShip.position.y - render.bounds.min.y) * scale;
-                ctx.translate(sx, sy); ctx.fillStyle = '#00ffcc'; ctx.rotate(activeShip.angle);
-                ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(10, 12); ctx.lineTo(-10, 12); ctx.closePath(); ctx.fill();
+                let path = getPredictivePath();
+                if (path.length > 1) {
+                    ctx.save();
+                    ctx.setTransform(1, 0, 0, 1, 0, 0); 
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#00ccff';
+                    ctx.lineWidth = 6; 
+                    for(let i=0; i<path.length; i++) {
+                        let sx = (path[i].x - bounds.min.x) * scaleX;
+                        let sy = (path[i].y - bounds.min.y) * scaleY;
+                        if(i===0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+                    }
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+
+            // 2. Draw Ship Marker
+            if (isMapView) {
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                let sx = (activeShip.position.x - bounds.min.x) * scaleX;
+                let sy = (activeShip.position.y - bounds.min.y) * scaleY;
+                ctx.translate(sx, sy);
+                ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
+                ctx.beginPath(); ctx.arc(0, 0, 25, 0, 2*Math.PI); ctx.fill();
+                ctx.rotate(activeShip.angle);
+                ctx.fillStyle = '#00ffcc';
+                ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(12, 12); ctx.lineTo(-12, 12); ctx.closePath(); ctx.fill();
                 ctx.restore();
             }
-            if (isEngineBurning && !isMapView) {
-                let eng = activeShip.parts[activeEngineLocalIndex + 1];
-                ctx.fillStyle = '#ffaa00'; ctx.beginPath(); ctx.arc(eng.position.x - Math.sin(activeShip.angle)*25, eng.position.y + Math.cos(activeShip.angle)*25, 12, 0, 7); ctx.fill();
+
+            // 3. Exhaust
+            if (isEngineBurning && activeEngineLocalIndex !== -1 && !isMapView) {
+                let engineSubBody = activeShip.parts[activeEngineLocalIndex + 1];
+                if(engineSubBody) {
+                    let exX = engineSubBody.position.x - Math.sin(activeShip.angle) * 30;
+                    let exY = engineSubBody.position.y + Math.cos(activeShip.angle) * 30;
+                    ctx.fillStyle = Math.random() > 0.5 ? '#ffaa00' : '#ff4400';
+                    ctx.beginPath(); ctx.arc(exX, exY, 15, 0, 2*Math.PI); ctx.fill();
+                }
             }
         }
     </script>
