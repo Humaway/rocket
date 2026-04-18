@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Dual Engines</title>
+    <title>Orbital Rocket Simulator - Planetary Scale Fix</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #050814; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
         .panel { position: absolute; background: rgba(10, 15, 25, 0.9); border: 1px solid #334; border-radius: 8px; padding: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); backdrop-filter: blur(4px); z-index: 10; }
         
         #build-ui { top: 20px; left: 20px; width: 350px; display: flex; flex-direction: column; gap: 10px; }
@@ -65,7 +65,7 @@
         <div class="telemetry-row"><span class="telemetry-label">SPEED</span><span id="tel-spd">0 m/s</span></div>
         <div class="telemetry-row"><span class="telemetry-label">ATMO DENSITY</span><span id="tel-atmo">100%</span></div>
         <div class="telemetry-row" style="margin-top: 10px;"><span class="telemetry-label">FUEL</span><span id="tel-fuel">100%</span></div>
-        <div id="clamp-warning">SYSTEMS READY<br><span style="font-size:0.75rem; color:#aaa;">Press [W] or [SPACE] to Ignite</span></div>
+        <div id="clamp-warning">SYSTEMS READY<br><span style="font-size:0.75rem; color:#aaa;">Ignite with [W] or [SPACE]</span></div>
     </div>
 
     <div id="controls-help">[W/UP] Thrust | [A/D] Steer | [SPACE] Stage | [M] Map View</div>
@@ -90,12 +90,12 @@
         let currentStageIndex = 0;
         let isLaunched = false;
         
-        // Massive scale planet for true orbital mechanics
+        // --- REALISTIC WORLD SCALE ---
         let planetBody;
-        const PLANET_RADIUS = 24000; 
+        const PLANET_RADIUS = 100000; // Massively scaled for realistic curvature
         const PLANET_POS = { x: 0, y: 0 }; 
-        const GRAVITY_CONSTANT = 3000000; // Calibrated for Earth-like initial pull
-        const ATMOSPHERE_HEIGHT = 12000;  // Absolute hard cutoff for vacuum
+        const GRAVITY_CONSTANT = 10000000; 
+        const ATMOSPHERE_HEIGHT = 20000; 
         
         let isMapView = false;
         let trajectory = [];
@@ -114,11 +114,9 @@
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
             } else if (type === 'booster') {
-                // Heavy, powerful, thirsty
-                part = { type: 'engine', name: 'Booster', mass: 1.2, thrust: 0.04, fuelDrain: 2.0, height: 45, width: 28, color: '#ff2222' }; 
+                part = { type: 'engine', name: 'Booster', mass: 1.2, thrust: 0.05, fuelDrain: 2.0, height: 45, width: 28, color: '#ff2222' }; 
             } else if (type === 'vacuum') {
-                // Light, weak, hyper-efficient
-                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.008, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
+                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.012, fuelDrain: 0.3, height: 25, width: 20, color: '#4444ff' }; 
             }
             rocketParts.push(part);
             updateUI();
@@ -168,7 +166,7 @@
                 b.partData = p; bodies.push(b); currentY += p.height; totalMass += p.mass;
             }
 
-            let compound = Body.create({ parts: bodies, mass: totalMass, frictionAir: 0.00 }); // Base friction MUST be 0
+            let compound = Body.create({ parts: bodies, mass: totalMass, frictionAir: 0.00 }); 
             compound.partsData = partsData; 
             return compound;
         }
@@ -180,6 +178,7 @@
             document.getElementById('controls-help').style.display = 'block';
             document.getElementById('clamp-warning').style.display = 'block';
             currentFuel = totalFuel;
+            isLaunched = false;
             initPhysics();
         }
 
@@ -189,15 +188,15 @@
 
             render = Render.create({
                 element: document.body, engine: engine,
-                options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#050814' }
+                options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }
             });
 
             planetBody = Bodies.circle(PLANET_POS.x, PLANET_POS.y, PLANET_RADIUS, { 
-                isStatic: true, friction: 1, render: { fillStyle: '#1a3627', strokeStyle: '#2a5c41', lineWidth: 5 } 
+                isStatic: true, friction: 1, render: { fillStyle: '#112211', strokeStyle: '#2a5c41', lineWidth: 10 } 
             });
             
-            let launchpad = Bodies.rectangle(0, -PLANET_RADIUS - 10, 300, 20, {
-                isStatic: true, friction: 1, render: { fillStyle: '#4a5568' }
+            let launchpad = Bodies.rectangle(0, -PLANET_RADIUS - 10, 500, 20, {
+                isStatic: true, friction: 1, render: { fillStyle: '#333b4d' }
             });
             
             Composite.add(engine.world, [planetBody, launchpad]);
@@ -205,7 +204,7 @@
             activeShip = createShipCompound(rocketParts);
             let startY = -PLANET_RADIUS - 20 - (activeShip.bounds.max.y - activeShip.bounds.min.y)/2;
             Body.setPosition(activeShip, {x: 0, y: startY});
-            Body.setStatic(activeShip, true); // Stasis
+            Body.setStatic(activeShip, true); 
 
             Composite.add(engine.world, activeShip);
             updateActiveEngine();
@@ -302,7 +301,6 @@
 
             let atmoPercentDisplay = 100;
 
-            // 1. Radial Gravity & Strict Vacuum Atmosphere
             let allBodies = [activeShip, ...debrisBodies];
             allBodies.forEach(body => {
                 if(!body) return;
@@ -321,30 +319,24 @@
                 
                 if (body === activeShip) atmoPercentDisplay = Math.floor(atmoDensity * 100);
 
-                // If density is 0, friction is 0, momentum is preserved perfectly forever.
                 if(body.partsData && body.partsData[0].type !== 'parachute') {
                     Body.set(body, 'frictionAir', 0.01 * atmoDensity);
                 }
             });
 
-            // 2. Dual Engine Thrust Control
             if ((keys['KeyW'] || keys['ArrowUp']) && currentFuel > 0 && activeEngineLocalIndex !== -1) {
                 initiateLaunchSequence();
                 let engineData = activeShip.partsData[activeEngineLocalIndex];
                 let force = { x: engineData.thrust * Math.sin(activeShip.angle), y: -engineData.thrust * Math.cos(activeShip.angle) };
                 Body.applyForce(activeShip, activeShip.position, force);
-                
-                // Drain fuel based on engine type
                 currentFuel -= (engineData.fuelDrain || 1.0); 
             }
 
-            // 3. Steering Control
             if (isLaunched) {
                 if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity - 0.0006);
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006);
             }
 
-            // 4. Telemetry
             let currentDist = Vector.magnitude(Vector.sub(PLANET_POS, activeShip.position));
             let altitudeRaw = currentDist - PLANET_RADIUS;
             let speedRaw = Vector.magnitude(activeShip.velocity) * 5;
@@ -354,23 +346,28 @@
             document.getElementById('tel-atmo').innerText = atmoPercentDisplay + '%';
             document.getElementById('tel-fuel').innerText = (totalFuel > 0 ? Math.max(0, Math.floor((currentFuel / totalFuel) * 100)) : 0) + '%';
 
-            // 5. Track Trajectory (Stores a huge 3000 point array so the loop connects)
             tickCounter++;
             if(tickCounter % 20 === 0 && isLaunched) {
                 trajectory.push({x: activeShip.position.x, y: activeShip.position.y});
                 if(trajectory.length > 3000) trajectory.shift(); 
             }
 
-            // 6. Camera System
             if(isMapView) {
-                let zoomOut = PLANET_RADIUS * 1.5;
+                // --- DYNAMIC BOUNDING BOX FRAMING ---
+                let dx = Math.abs(activeShip.position.x - PLANET_POS.x);
+                let dy = Math.abs(activeShip.position.y - PLANET_POS.y);
+                let shipDist = Math.sqrt(dx*dx + dy*dy);
+                
+                // Keep the framing center on the midpoint or just use planet center with massive radius
+                let viewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.25; 
+                
                 Render.lookAt(render, {
-                    min: { x: PLANET_POS.x - zoomOut, y: PLANET_POS.y - zoomOut },
-                    max: { x: PLANET_POS.x + zoomOut, y: PLANET_POS.y + zoomOut }
+                    min: { x: PLANET_POS.x - viewSpan, y: PLANET_POS.y - viewSpan },
+                    max: { x: PLANET_POS.x + viewSpan, y: PLANET_POS.y + viewSpan }
                 });
             } else {
                 let targetZoom = 1 + (Math.max(0, altitudeRaw) * 0.0002);
-                targetZoom = Math.min(targetZoom, 3.0); 
+                targetZoom = Math.min(targetZoom, 3.5); 
                 Render.lookAt(render, {
                     min: { x: activeShip.position.x - (window.innerWidth/2) * targetZoom, y: activeShip.position.y - (window.innerHeight/2) * targetZoom },
                     max: { x: activeShip.position.x + (window.innerWidth/2) * targetZoom, y: activeShip.position.y + (window.innerHeight/2) * targetZoom }
@@ -382,12 +379,11 @@
             if (mode !== 'flight') return;
             const ctx = render.context;
             
-            // Dynamic Line Thickness based on zoom scale
+            // Scaled Line Thickness
             let currentScale = render.bounds.max.x - render.bounds.min.x;
             let baseScale = window.innerWidth;
-            let dynamicLineWidth = Math.max(2, (currentScale / baseScale) * 3);
+            let dynamicLineWidth = Math.max(5, (currentScale / baseScale) * 10);
 
-            // Draw Trajectory Trail
             if (trajectory.length > 1) {
                 ctx.beginPath();
                 ctx.moveTo(trajectory[0].x, trajectory[0].y);
@@ -397,7 +393,6 @@
                 ctx.stroke();
             }
 
-            // Draw Exhaust
             if ((keys['KeyW'] || keys['ArrowUp']) && currentFuel > 0 && activeEngineLocalIndex !== -1 && !isMapView) {
                 let engineSubBody = activeShip.parts[activeEngineLocalIndex + 1];
                 if(engineSubBody) {
@@ -406,8 +401,7 @@
                     let exY = engineSubBody.position.y + Math.cos(activeShip.angle) * (engineData.height/2 + 5);
                     ctx.fillStyle = Math.random() > 0.5 ? '#ffaa00' : '#ff4400';
                     ctx.beginPath();
-                    // Bigger exhaust for booster
-                    let exhaustSize = engineData.name === 'Booster' ? (12 + Math.random()*8) : (6 + Math.random()*4);
+                    let exhaustSize = engineData.name === 'Booster' ? (15 + Math.random()*10) : (8 + Math.random()*5);
                     ctx.arc(exX, exY, exhaustSize, 0, 2*Math.PI);
                     ctx.fill();
                 }
