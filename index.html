@@ -25,12 +25,12 @@
         .grid-cell.filled { border-color: #fff; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
         
         /* Staging UI */
-        .staging-panel { background: rgba(0,0,0,0.8); border: 1px solid #445; border-radius: 8px; padding: 10px; width: 200px; max-height: 600px; overflow-y: auto; }
+        .staging-panel { background: rgba(0,0,0,0.8); border: 1px solid #445; border-radius: 8px; padding: 10px; width: 220px; max-height: 600px; overflow-y: auto; }
         .stage-group { background: #0f172a; border: 1px dashed #334; margin-bottom: 10px; padding: 5px; border-radius: 6px; min-height: 40px; }
         .stage-group.drag-over { border-color: #eab308; background: rgba(234, 179, 8, 0.1); }
         .stage-group-title { font-size: 0.7rem; color: #eab308; margin-bottom: 5px; font-weight: bold; }
         .stage-item { background: #1e293b; border: 1px solid #334; padding: 4px 8px; margin-bottom: 4px; border-radius: 4px; font-size: 0.7rem; cursor: grab; display: flex; justify-content: space-between; }
-        .stage-add-btn { background: #334; color: white; border: none; width: 100%; padding: 5px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+        .stage-add-btn { background: #334; color: white; border: none; flex: 1; padding: 8px 4px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
         .stage-add-btn:hover { background: #445; }
 
         /* Menu Colors */
@@ -84,7 +84,10 @@
             <div class="staging-panel">
                 <div style="font-size: 0.8rem; margin-bottom: 10px; color:#00ffcc;">DRAG & DROP STAGING</div>
                 <div id="staging-list-container"></div>
-                <button class="stage-add-btn" onclick="addStage()">+ Add Stage</button>
+                <div style="display: flex; gap: 5px; margin-top: 10px;">
+                    <button class="stage-add-btn" onclick="addStageTop()">+ Top (Last)</button>
+                    <button class="stage-add-btn" onclick="addStageBottom()">+ Btm (First)</button>
+                </div>
             </div>
         </div>
         
@@ -224,8 +227,9 @@
             });
         }
 
-        // FIX: Using push() instead of unshift() appends the new stage to the BOTTOM of the list.
-        function addStage() { stagingList.push([]); renderStagingUI(); }
+        // NEW: Two distinct add stage buttons to prevent dragging UI mess
+        function addStageTop() { stagingList.unshift([]); renderStagingUI(); }
+        function addStageBottom() { stagingList.push([]); renderStagingUI(); }
 
         function renderStagingUI() {
             let container = document.getElementById('staging-list-container');
@@ -234,7 +238,8 @@
             stagingList.forEach((stage, sIdx) => {
                 let group = document.createElement('div');
                 group.className = 'stage-group';
-                group.innerHTML = `<div class="stage-group-title">STAGE ${stagingList.length - 1 - sIdx}</div>`;
+                let stageNum = stagingList.length - 1 - sIdx;
+                group.innerHTML = `<div class="stage-group-title">STAGE ${stageNum}</div>`;
                 
                 group.addEventListener('dragover', e => { e.preventDefault(); group.classList.add('drag-over'); });
                 group.addEventListener('dragleave', e => group.classList.remove('drag-over'));
@@ -353,23 +358,17 @@
         function createCompoundBodyFromData(partDataArray, spawnPos, oldVel = {x:0,y:0}, oldAngle = 0, oldAngVel = 0) {
             let matterParts = []; let totalMass = 0;
             partDataArray.forEach(p => {
-                // FIX: Setting group to -1 prevents ALL parts of the ship from ever colliding with each other.
-                // This permanently eliminates the "Explosion on decoupling" bug!
-                let rect = Bodies.rectangle(p.localX, p.localY, p.w, p.h, { 
-                    mass: p.mass, 
-                    render: { visible: false },
-                    collisionFilter: { group: -1 } 
-                });
+                let rect = Bodies.rectangle(p.localX, p.localY, p.w, p.h, { mass: p.mass, render: { visible: false } });
                 rect.partData = p; matterParts.push(rect); totalMass += p.mass;
             });
             if(matterParts.length === 0) return null;
 
-            let compound = Body.create({ 
-                parts: matterParts, 
-                mass: totalMass, 
-                frictionAir: 0.00,
-                collisionFilter: { group: -1 }
-            });
+            let compound = Body.create({ parts: matterParts, mass: totalMass, frictionAir: 0.00 });
+            
+            // FIX: Hard-lock collision filters for ALL parts to -1, eliminating overlapping body explosions entirely
+            compound.collisionFilter.group = -1;
+            compound.parts.forEach(p => { if (p) p.collisionFilter.group = -1; });
+            
             compound.blueprint = partDataArray; 
             Body.setPosition(compound, spawnPos); Body.setAngle(compound, oldAngle);
             Body.setVelocity(compound, oldVel); Body.setAngularVelocity(compound, oldAngVel);
@@ -377,13 +376,24 @@
         }
 
         // --- 4. FLIGHT CONTROLS & STAGING EXECUTION ---
+        let spacePressed = false; // Anti-spam variable
+        
         window.addEventListener('keydown', (e) => {
             if(mode !== 'flight') return;
             keys[e.code] = true;
-            if (e.code === 'Space' && isLaunched) executeStaging();
+            
+            // Anti-spam to stop holding SPACE from firing all stages in 1 frame
+            if (e.code === 'Space' && isLaunched && !spacePressed) {
+                spacePressed = true;
+                executeStaging();
+            }
             if (e.code === 'KeyM') toggleMap();
         });
-        window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+        
+        window.addEventListener('keyup', (e) => { 
+            keys[e.code] = false; 
+            if (e.code === 'Space') spacePressed = false;
+        });
         
         window.addEventListener('wheel', e => {
             if(!isMapView) return;
@@ -442,6 +452,7 @@
                 }
             });
 
+            // If the stage just turned on an engine or parachute but had no explosive decouplers, skip splitting
             if (targetsToDestroy.length === 0) return;
 
             let adjGrid = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
@@ -485,28 +496,48 @@
                 }
             });
 
-            let oldAngle = activeBody.angle, oldVel = activeBody.velocity, oldAngVel = activeBody.angularVelocity;
+            let oldAngle = activeBody.angle, oldAngVel = activeBody.angularVelocity;
             let oldPodBody = activeBody.parts.find(sub => sub.partData && sub.partData.type === 'pod');
             let podWorldPos = oldPodBody ? {x: oldPodBody.position.x, y: oldPodBody.position.y} : activeBody.position;
 
             Composite.remove(engine.world, activeBody); shipBodies.splice(activeShipIndex, 1);
 
+            // FIX: Calculating exact linear velocity of the NEW center of mass based on old angular momentum.
             if (activeBlueprint.length > 0) {
-                let newShip = createCompoundBodyFromData(activeBlueprint, {x:0, y:0}, oldVel, oldAngle, oldAngVel);
+                let newShip = createCompoundBodyFromData(activeBlueprint, {x:0, y:0}, {x:0,y:0}, oldAngle, oldAngVel);
                 let newPodBody = newShip.parts.find(sub => sub.partData && sub.partData.type === 'pod');
-                Body.setPosition(newShip, Vector.add(podWorldPos, Vector.sub(newShip.position, newPodBody.position)));
+                let targetPos = Vector.add(podWorldPos, Vector.sub(newShip.position, newPodBody.position));
+                Body.setPosition(newShip, targetPos);
+                
+                let dx = newShip.position.x - activeBody.position.x;
+                let dy = newShip.position.y - activeBody.position.y;
+                let exactVel = { x: activeBody.velocity.x - oldAngVel * dy, y: activeBody.velocity.y + oldAngVel * dx };
+                
+                Body.setVelocity(newShip, exactVel);
                 shipBodies.push(newShip); activeShipIndex = shipBodies.length - 1;
-                Body.applyForce(newShip, newShip.position, {x: Math.sin(oldAngle)*0.02, y: -Math.cos(oldAngle)*0.02}); 
             }
 
             allDebrisBlueprints.forEach(debBp => {
-                let debShip = createCompoundBodyFromData(debBp, {x:0, y:0}, oldVel, oldAngle, oldAngVel);
+                let debShip = createCompoundBodyFromData(debBp, {x:0, y:0}, {x:0,y:0}, oldAngle, oldAngVel);
                 let anchorOld = activeBody.parts.find(sub => sub.partData && sub.partData.id === debBp[0].id);
                 let anchorNew = debShip.parts.find(sub => sub.partData && sub.partData.id === debBp[0].id);
-                if(anchorOld && anchorNew) Body.setPosition(debShip, Vector.add(anchorOld.position, Vector.sub(debShip.position, anchorNew.position)));
+                
+                if(anchorOld && anchorNew) {
+                    let targetPos = Vector.add(anchorOld.position, Vector.sub(debShip.position, anchorNew.position));
+                    Body.setPosition(debShip, targetPos);
+                    let dx = debShip.position.x - activeBody.position.x;
+                    let dy = debShip.position.y - activeBody.position.y;
+                    let exactVel = { x: activeBody.velocity.x - oldAngVel * dy, y: activeBody.velocity.y + oldAngVel * dx };
+                    Body.setVelocity(debShip, exactVel);
+                }
 
-                if(targetsToDestroy[0].type === 'radial') { Body.applyForce(debShip, debShip.position, {x: debBp[0].gridC < 2 ? -0.2 : 0.2, y: 0});
-                } else { Body.applyForce(debShip, debShip.position, {x: -Math.sin(oldAngle)*0.02, y: Math.cos(oldAngle)*0.02}); }
+                let sepForce = 0.002 * debShip.mass; // Scaled to prevent wildly heavy/light parts behaving differently
+                if(targetsToDestroy[0].type === 'radial') { 
+                    let dir = debBp[0].gridC < 2 ? -1 : 1;
+                    Body.applyForce(debShip, debShip.position, { x: Math.cos(oldAngle) * sepForce * dir, y: Math.sin(oldAngle) * sepForce * dir });
+                } else { 
+                    Body.applyForce(debShip, debShip.position, { x: -Math.sin(oldAngle) * sepForce, y: Math.cos(oldAngle) * sepForce }); 
+                }
                 shipBodies.push(debShip);
             });
         }
