@@ -463,6 +463,9 @@
             let dt = 2; // FIX: Much tighter timestep for accurate integration
             let steps = 150000; // FIX: Massive projection distance to wrap around the entire planet
             
+            // FIX 2: Fetch the physics engine's time delta (defaults to ~16.666)
+            let tickDelta = engine.timing.lastDelta || (1000/60);
+            
             for (let i = 0; i < steps; i++) { 
                 if(i % 50 === 0) points.push({ x: px, y: py }); // Store far fewer points for performance
                 
@@ -471,7 +474,8 @@
                 
                 if (r < PLANET_RADIUS) { points.push({ x: px, y: py }); break; }
                 
-                let acc = GRAVITY_CONSTANT / r2;
+                // FIX 2b: Multiply acceleration by tickDelta so it matches Matter.js applyForce scaling
+                let acc = (GRAVITY_CONSTANT / r2) * tickDelta;
                 
                 // FIX: Apply friction ONLY if in atmosphere. This prevents vacuum paths from spiraling/straightening improperly.
                 if (r < PLANET_RADIUS + ATMOSPHERE_HEIGHT) {
@@ -557,8 +561,14 @@
                     let d = sub.partData; if(!d) return;
 
                     ctx.save();
-                    ctx.translate(sub.position.x, sub.position.y);
+                    
+                    // FIX 1: Convert Matter.js world coordinates to screen coordinates
+                    let sx = (sub.position.x - bounds.min.x) * scaleX;
+                    let sy = (sub.position.y - bounds.min.y) * scaleY;
+                    
+                    ctx.translate(sx, sy);
                     ctx.rotate(sub.angle);
+                    ctx.scale(scaleX, scaleY); // FIX 1b: Scale the drawing to match camera zoom
 
                     // PROPER GRAPHICS
                     if(d.type === 'pod') {
