@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Stage Accurate Fuel</title>
+    <title>Orbital Rocket Simulator - True Physics & Map View</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -89,11 +89,11 @@
         let currentStageIndex = 0;
         let isLaunched = false;
         
-        // Massive scale planet for true orbital mechanics
+        // Massive scale planet
         let planetBody;
         const PLANET_RADIUS = 100000; 
         const PLANET_POS = { x: 0, y: 0 }; 
-        const GRAVITY_CONSTANT = 10000000; 
+        const GRAVITY_CONSTANT = 10000000; // Translates to roughly 0.001 downward force per mass unit at surface
         const ATMOSPHERE_HEIGHT = 20000; 
         
         let isMapView = false;
@@ -104,23 +104,22 @@
 
         function addPart(type) {
             let part;
-            // Deep copy objects to prevent shared reference bugs with individual fuel tanks
             if (type === 'parachute') {
                 if (rocketParts[0].type === 'parachute') return;
                 rocketParts.unshift({ type: 'parachute', name: 'Parachute', mass: 0.1, height: 15, width: 20, color: '#ff4444' });
                 updateUI(); return;
             } else if (type === 'tank') {
-                // Notice the individualized fuelCapacity and fuelRemaining variables
                 part = { type: 'tank', name: 'Fuel Tank', mass: 0.8, fuelCapacity: 1500, fuelRemaining: 1500, height: 60, width: 40, color: '#ff8800' };
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
             } else if (type === 'booster') {
-                part = { type: 'engine', name: 'Booster', mass: 1.2, thrust: 0.05, fuelDrain: 2.0, height: 45, width: 28, color: '#ff2222' }; 
+                // TWR balanced to push a full multi-stage stack
+                part = { type: 'engine', name: 'Booster', mass: 1.2, thrust: 0.006, fuelDrain: 2.0, height: 45, width: 28, color: '#ff2222' }; 
             } else if (type === 'vacuum') {
-                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.012, fuelDrain: 0.3, height: 25, width: 20, color: '#4444ff' }; 
+                // Highly efficient, but weak thrust. Cannot lift off from sea level.
+                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.0015, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
             }
             
-            // Push a fresh clone of the part into the array
             rocketParts.push(JSON.parse(JSON.stringify(part)));
             updateUI();
         }
@@ -180,6 +179,8 @@
             document.getElementById('controls-help').style.display = 'block';
             document.getElementById('clamp-warning').style.display = 'block';
             isLaunched = false;
+            isMapView = false;
+            trajectory = [];
             initPhysics();
         }
 
@@ -202,7 +203,6 @@
             
             Composite.add(engine.world, [planetBody, launchpad]);
 
-            // Clone parts array for the live simulation ship
             let liveParts = JSON.parse(JSON.stringify(rocketParts));
             activeShip = createShipCompound(liveParts);
             let startY = -PLANET_RADIUS - 20 - (activeShip.bounds.max.y - activeShip.bounds.min.y)/2;
@@ -298,7 +298,6 @@
             currentStageIndex--; updateActiveEngine(); highlightCurrentStage();
         }
 
-        // Global tracker so renderer knows if we have fuel burning
         let isEngineBurning = false;
 
         function gameLoop() {
@@ -340,7 +339,6 @@
                 let fuelToDrain = engineData.fuelDrain || 1.0;
                 let hasDrainedFuel = false;
 
-                // Scan active ship bottom-up for available fuel tanks
                 for(let i = activeShip.partsData.length - 1; i >= 0; i--) {
                     let p = activeShip.partsData[i];
                     if(p.type === 'tank' && p.fuelRemaining > 0) {
@@ -348,17 +346,15 @@
                             p.fuelRemaining -= fuelToDrain;
                             fuelToDrain = 0;
                             hasDrainedFuel = true;
-                            break; // Successfully drained required fuel
+                            break; 
                         } else {
                             fuelToDrain -= p.fuelRemaining;
                             p.fuelRemaining = 0;
                             hasDrainedFuel = true;
-                            // Loop continues to next tank to pull the rest
                         }
                     }
                 }
 
-                // Only apply physical force if we successfully pulled fuel from a tank
                 if (hasDrainedFuel) {
                     let force = { x: engineData.thrust * Math.sin(activeShip.angle), y: -engineData.thrust * Math.cos(activeShip.angle) };
                     Body.applyForce(activeShip, activeShip.position, force);
@@ -372,7 +368,7 @@
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006);
             }
 
-            // 4. Calculate Telemetry (Only for current active stage)
+            // 4. Calculate Telemetry 
             let stageFuelMax = 0;
             let stageFuelRemaining = 0;
             activeShip.partsData.forEach(p => {
@@ -424,20 +420,42 @@
             if (mode !== 'flight') return;
             const ctx = render.context;
             
+            // Scaled Rendering Math
             let currentScale = render.bounds.max.x - render.bounds.min.x;
             let baseScale = window.innerWidth;
-            let dynamicLineWidth = Math.max(5, (currentScale / baseScale) * 10);
+            
+            // Dramatically increase trajectory thickness in Map View
+            let dynamicLineWidth = isMapView ? Math.max(20, (currentScale / baseScale) * 12) : Math.max(5, (currentScale / baseScale) * 5);
 
             if (trajectory.length > 1) {
                 ctx.beginPath();
                 ctx.moveTo(trajectory[0].x, trajectory[0].y);
                 for(let i = 1; i < trajectory.length; i++) { ctx.lineTo(trajectory[i].x, trajectory[i].y); }
-                ctx.strokeStyle = 'rgba(255, 50, 50, 0.6)';
+                ctx.strokeStyle = 'rgba(255, 50, 50, 0.8)';
                 ctx.lineWidth = dynamicLineWidth; 
                 ctx.stroke();
             }
 
-            // Only draw exhaust if the engine is actively burning fuel
+            // Map View Ship Marker (Ensure it's always perfectly visible)
+            if (isMapView && activeShip) {
+                let markerSize = currentScale * 0.015; // Scaled to always be ~1.5% of the screen width
+                
+                ctx.save();
+                ctx.translate(activeShip.position.x, activeShip.position.y);
+                ctx.rotate(activeShip.angle);
+                
+                // Draw a neon cyan triangle pointing in the ship's heading
+                ctx.fillStyle = '#00ffcc';
+                ctx.beginPath();
+                ctx.moveTo(0, -markerSize); // Nose
+                ctx.lineTo(markerSize/2, markerSize); // Right base
+                ctx.lineTo(-markerSize/2, markerSize); // Left base
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.restore();
+            }
+
             if (isEngineBurning && activeEngineLocalIndex !== -1 && !isMapView) {
                 let engineSubBody = activeShip.parts[activeEngineLocalIndex + 1];
                 if(engineSubBody) {
