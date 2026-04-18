@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V3 - Horizon Fix</title>
+    <title>Orbital Simulator V4 - Graphics & Physics Overhaul</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -24,9 +24,10 @@
         .grid-cell.drag-over { background: rgba(0, 255, 204, 0.3); border-color: #00ffcc; }
         .grid-cell.filled { border-color: #fff; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
         
+        /* Menu Colors */
         .part-pod { background: #cbd5e1; color: #000; border-top-left-radius: 25px; border-top-right-radius: 25px; }
-        .part-tank { background: #f97316; }
-        .part-tank-large { background: #ea580c; }
+        .part-tank { background: #e2e8f0; color: #000; border-left: 5px solid #dc2626; border-right: 5px solid #dc2626; }
+        .part-tank-large { background: #cbd5e1; color: #000; border-left: 5px solid #dc2626; border-right: 5px solid #dc2626; }
         .part-engine-vac { background: #3b82f6; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
         .part-engine-boost { background: #eab308; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
         .part-engine-heavy { background: #ef4444; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
@@ -50,7 +51,7 @@
 
     <div id="vab-ui" class="panel">
         <h2>Vehicle Assembly</h2>
-        <div class="instruction">Drag parts from the palette to the grid. Drag parts inside the grid to move them. Click a part to delete it. Middle column is the core.</div>
+        <div class="instruction">Drag parts from the palette to the grid. Click a part to delete it. Middle column is the core. Radials snap to cols 1 and 3.</div>
         
         <div class="vab-layout">
             <div class="palette">
@@ -78,23 +79,23 @@
         <div class="telemetry-row"><span class="telemetry-label">ALTITUDE</span><span id="tel-alt">0 km</span></div>
         <div class="telemetry-row"><span class="telemetry-label">SPEED</span><span id="tel-spd">0 m/s</span></div>
         <div class="telemetry-row"><span class="telemetry-label">ATMO DENSITY</span><span id="tel-atmo">100%</span></div>
-        <div class="telemetry-row"><span class="telemetry-label">ACTIVE FUEL</span><span id="tel-fuel">100%</span></div>
+        <div class="telemetry-row"><span class="telemetry-label">STAGE FUEL</span><span id="tel-fuel">100%</span></div>
     </div>
 
     <div id="controls-help">[W] Throttle | [A/D] Steer | [SPACE] Stage | [M] Map View</div>
 
     <script>
-        // --- 1. PART DATABASE (LOCKED POWER STATS) ---
+        // --- 1. PART DATABASE (Fuel 10x, Balanced TWR) ---
         const PART_DATA = {
             'pod': { mass: 1.0, fuel: 0, thrust: 0, w: 40, h: 48, type: 'pod' },
             'parachute': { mass: 0.1, fuel: 0, thrust: 0, w: 30, h: 20, type: 'parachute' },
-            'tank': { mass: 0.8, fuel: 2000, thrust: 0, w: 48, h: 48, type: 'tank' },
-            'tank-large': { mass: 1.6, fuel: 4000, thrust: 0, w: 48, h: 98, type: 'tank' },
+            'tank': { mass: 0.8, fuel: 20000, thrust: 0, w: 48, h: 48, type: 'tank' },
+            'tank-large': { mass: 1.6, fuel: 40000, thrust: 0, w: 48, h: 98, type: 'tank' },
             'decoupler': { mass: 0.2, fuel: 0, thrust: 0, w: 48, h: 12, type: 'decoupler' },
             'radial': { mass: 0.2, fuel: 0, thrust: 0, w: 16, h: 40, type: 'radial' },
-            'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.0015, drain: 0.2, w: 30, h: 35, type: 'engine' }, 
-            'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.0055, drain: 2.0, w: 40, h: 45, type: 'engine' }, 
-            'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.012, drain: 6.0, w: 48, h: 55, type: 'engine' }  
+            'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.003, drain: 1.5, w: 30, h: 35, type: 'engine' }, 
+            'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.009, drain: 6.0, w: 40, h: 45, type: 'engine' }, 
+            'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.022, drain: 18.0, w: 48, h: 55, type: 'engine' }  
         };
 
         // --- 2. VAB GRID LOGIC (5x12) ---
@@ -104,7 +105,6 @@
         let draggedType = null;
         let dragSource = null; 
 
-        // Initialize empty pod
         gridState[0][2] = 'pod';
 
         for(let r=0; r<ROWS; r++) {
@@ -132,7 +132,6 @@
         function handleDrop(e, r, c, cell) {
             e.preventDefault(); cell.classList.remove('drag-over');
             if(!draggedType) return;
-            // Radials only fit on column 1 and 3
             if(draggedType === 'radial' && c !== 1 && c !== 3) return;
 
             if(dragSource) { removePart(dragSource.r, dragSource.c); } 
@@ -169,14 +168,15 @@
         }
         renderGrid();
 
-        // --- 3. PHYSICS & TRUE RIGID BODY ENGINE ---
+        // --- 3. PHYSICS ENGINE ---
         const Engine = Matter.Engine, Render = Matter.Render, Runner = Matter.Runner,
               Bodies = Matter.Bodies, Body = Matter.Body, Composite = Matter.Composite, Vector = Matter.Vector;
 
-        const PLANET_RADIUS = 500000, PLANET_POS = { x: 0, y: 0 }, ATMOSPHERE_HEIGHT = 50000, GRAVITY_CONSTANT = 250000000; 
+        const PLANET_RADIUS = 500000, PLANET_POS = { x: 0, y: 0 }, ATMOSPHERE_HEIGHT = 50000, GRAVITY_CONSTANT = 10000000000; 
         
         let engine, render, runner;
         let mode = 'build', keys = {}, isLaunched = false, isMapView = false;
+        let mapCameraViewSpan = PLANET_RADIUS * 1.3; 
         
         let shipBodies = []; 
         let activeShipIndex = 0; 
@@ -203,7 +203,6 @@
             engine.gravity.scale = 0; 
             render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }});
             
-            // Invisible physical padding
             let pad = Bodies.rectangle(0, -PLANET_RADIUS - 20, 2000, 40, { isStatic: true, friction: 1, render: { visible: false }});
             Composite.add(engine.world, pad);
 
@@ -232,12 +231,12 @@
             Matter.Events.on(engine, 'beforeUpdate', gameLoop); Matter.Events.on(render, 'afterRender', customRender);
         }
 
-        // Fuses blocks into one perfect solid body (0 wobble)
         function createCompoundBodyFromData(partDataArray, spawnPos, oldVel = {x:0,y:0}, oldAngle = 0, oldAngVel = 0) {
             let matterParts = [];
             let totalMass = 0;
             partDataArray.forEach(p => {
-                let rect = Bodies.rectangle(p.localX, p.localY, p.w, p.h, { mass: p.mass });
+                // HIDE the default matter.js blocks so we can draw custom graphics over them
+                let rect = Bodies.rectangle(p.localX, p.localY, p.w, p.h, { mass: p.mass, render: { visible: false } });
                 rect.partData = p; 
                 matterParts.push(rect);
                 totalMass += p.mass;
@@ -255,7 +254,7 @@
             return compound;
         }
 
-        // --- 4. FLOOD FILL STAGING ---
+        // --- 4. STAGING ---
         window.addEventListener('keydown', (e) => {
             keys[e.code] = true;
             if (e.code === 'Space' && mode === 'flight' && isLaunched) executeStaging();
@@ -274,24 +273,22 @@
             let targetsToDestroy = [];
             
             if (radials.length > 0) {
-                targetsToDestroy = radials; // Drop all outer boosters
+                targetsToDestroy = radials; 
             } else if (verticals.length > 0) {
                 let lowest = verticals.reduce((max, p) => p.gridR > max.gridR ? p : max, verticals[0]);
-                targetsToDestroy = [lowest]; // Drop lowest center stage
+                targetsToDestroy = [lowest]; 
             } else {
                 let chute = bp.find(p => p.type === 'parachute');
                 if(chute && !chute.deployed) { chute.deployed = true; return; }
                 return; 
             }
 
-            // Map grid and remove destroyed components
             let adjGrid = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
             bp.forEach(p => { if(!targetsToDestroy.includes(p)) adjGrid[p.gridR][p.gridC] = p; });
 
             let pod = bp.find(p => p.type === 'pod');
             if(!pod) return; 
 
-            // Flood Fill to find remaining main ship
             let activeBlueprint = [];
             let visited = new Set();
             let queue = [pod];
@@ -315,7 +312,6 @@
                 });
             }
 
-            // Find detached debris
             let allDebrisBlueprints = [];
             bp.forEach(p => {
                 let key = `${p.gridR}-${p.gridC}`;
@@ -339,7 +335,6 @@
                 }
             });
 
-            // Rebuild
             let oldAngle = activeBody.angle, oldVel = activeBody.velocity, oldAngVel = activeBody.angularVelocity;
             let oldPodBody = activeBody.parts.find(sub => sub.partData && sub.partData.type === 'pod');
             let podWorldPos = oldPodBody ? {x: oldPodBody.position.x, y: oldPodBody.position.y} : activeBody.position;
@@ -352,7 +347,7 @@
                 let newPodBody = newShip.parts.find(sub => sub.partData && sub.partData.type === 'pod');
                 Body.setPosition(newShip, Vector.add(podWorldPos, Vector.sub(newShip.position, newPodBody.position)));
                 shipBodies.push(newShip); activeShipIndex = shipBodies.length - 1;
-                Body.applyForce(newShip, newShip.position, {x: Math.sin(oldAngle)*0.02, y: -Math.cos(oldAngle)*0.02}); // Small separation kick
+                Body.applyForce(newShip, newShip.position, {x: Math.sin(oldAngle)*0.02, y: -Math.cos(oldAngle)*0.02}); 
             }
 
             allDebrisBlueprints.forEach(debBp => {
@@ -376,7 +371,7 @@
             if (!activeBody) return;
 
             let isThrusting = (keys['KeyW'] || keys['ArrowUp']);
-            if (isThrusting && !isLaunched) { isLaunched = true; Body.setStatic(activeBody, false); document.getElementById('clamp-warning').style.display='none'; }
+            if (isThrusting && !isLaunched) { isLaunched = true; Body.setStatic(activeBody, false); }
 
             shipBodies.forEach(body => {
                 let dx = PLANET_POS.x - body.position.x, dy = PLANET_POS.y - body.position.y;
@@ -395,15 +390,24 @@
                 }
             });
 
-            let stageFuel = 0, stageFuelMax = 0;
-            activeBody.blueprint.forEach(p => { if(p.type === 'tank') { stageFuelMax += p.fuelCapacity; stageFuel += p.fuelRemaining; }});
+            let stageFuelMax = 0, stageFuelRemaining = 0;
+            activeBody.blueprint.forEach(p => {
+                if(p.type === 'tank') {
+                    stageFuelMax += p.fuelCapacity;
+                    stageFuelRemaining += p.fuelRemaining;
+                }
+            });
 
             if (isThrusting && isLaunched) {
                 activeBody.blueprint.forEach(p => {
                     if (p.type === 'engine') {
                         let hasFuel = false;
                         for(let t of activeBody.blueprint) {
-                            if(t.type === 'tank' && t.fuelRemaining >= p.drain) { t.fuelRemaining -= p.drain; hasFuel = true; break; }
+                            if(t.type === 'tank' && t.fuelRemaining >= p.drain) {
+                                t.fuelRemaining -= p.drain;
+                                stageFuelRemaining -= p.drain; // Update dynamic tracker
+                                hasFuel = true; break;
+                            }
                         }
                         if (hasFuel) {
                             let subBody = activeBody.parts.find(sb => sb.partData && sb.partData.id === p.id);
@@ -414,50 +418,56 @@
                         } else { p.isBurning = false; }
                     }
                 });
-            } else { activeBody.blueprint.forEach(p => { if(p.type==='engine') p.isBurning = false; }); }
+            } else {
+                activeBody.blueprint.forEach(p => { if(p.type==='engine') p.isBurning = false; });
+            }
 
+            // Fixed Sensitive Steering (Significantly reduced Angular Velocity application)
             if (isLaunched) {
-                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity - 0.0010);
-                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity + 0.0010);
+                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity - 0.0003);
+                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity + 0.0003);
             }
 
             let dist = Vector.magnitude(activeBody.position);
             let alt = dist - PLANET_RADIUS;
+            
             document.getElementById('tel-alt').innerText = (alt / 100).toFixed(1) + ' km';
             document.getElementById('tel-spd').innerText = Math.floor(Vector.magnitude(activeBody.velocity) * 10) + ' m/s';
             document.getElementById('tel-atmo').innerText = alt < ATMOSPHERE_HEIGHT ? Math.floor((1 - alt/ATMOSPHERE_HEIGHT)*100) + '%' : '0% (VAC)';
-            document.getElementById('tel-fuel').innerText = stageFuelMax > 0 ? Math.floor((stageFuel / stageFuelMax) * 100) + '%' : '0%';
+            
+            let fuelPercentage = stageFuelMax > 0 ? Math.max(0, Math.floor((stageFuelRemaining / stageFuelMax) * 100)) : 0;
+            document.getElementById('tel-fuel').innerText = fuelPercentage + '%';
 
             if(isMapView) {
-                let mapSpan = Math.max(dist, PLANET_RADIUS) * 1.5; 
-                Render.lookAt(render, { min: { x: -mapSpan, y: -mapSpan }, max: { x: mapSpan, y: mapSpan } });
+                mapCameraViewSpan = Math.max(dist, PLANET_RADIUS) * 1.5; 
+                Render.lookAt(render, { min: { x: -mapCameraViewSpan, y: -mapCameraViewSpan }, max: { x: mapCameraViewSpan, y: mapCameraViewSpan } });
             } else {
                 let zoom = 1 + (Math.max(0, alt) * 0.00005);
                 zoom = Math.min(zoom, 5.0);
                 Render.lookAt(render, {
-                    min: { x: activeBody.position.x - (window.innerWidth/2)*zoom, y: activeBody.position.y - (window.innerHeight/2)*zoom },
-                    max: { x: activeBody.position.x + (window.innerWidth/2)*zoom, y: activeBody.position.y + (window.innerHeight/2)*zoom }
+                    min: { x: activeBody.position.x - (window.innerWidth/2)*zoom, y: activeShip.position.y - (window.innerHeight/2)*zoom },
+                    max: { x: activeBody.position.x + (window.innerWidth/2)*zoom, y: activeShip.position.y + (window.innerHeight/2)*zoom }
                 });
             }
         }
 
-        // --- 6. HIGH FIDELITY ORBIT PREDICTOR ---
+        // --- 6. ORBIT PREDICTOR ---
         function getPredictivePath() {
             let activeBody = shipBodies[activeShipIndex];
             if (!activeBody || !isLaunched) return [];
             let points = [];
             let px = activeBody.position.x, py = activeBody.position.y, vx = activeBody.velocity.x, vy = activeBody.velocity.y;
-            let dt = 5; 
+            let dt = 30; // Fast forward
             
-            for (let i = 0; i < 40000; i++) {
-                if(i % 100 === 0) points.push({ x: px, y: py });
+            for (let i = 0; i < 20000; i++) { // Project 600,000 frames into future
+                if(i % 15 === 0) points.push({ x: px, y: py });
                 let r2 = px*px + py*py, r = Math.sqrt(r2);
                 if (r < PLANET_RADIUS) { points.push({ x: px, y: py }); break; }
                 
                 vx -= (px/r) * (GRAVITY_CONSTANT / r2) * dt; vy -= (py/r) * (GRAVITY_CONSTANT / r2) * dt;
                 px += vx * dt; py += vy * dt;
 
-                if (r > PLANET_RADIUS * 10) break; 
+                if (r > PLANET_RADIUS * 12) break; 
                 if (i > 1000 && Math.pow(px - activeBody.position.x, 2) + Math.pow(py - activeBody.position.y, 2) < 50000000) {
                     points.push({ x: px, y: py }); break; 
                 }
@@ -465,7 +475,7 @@
             return points;
         }
 
-        // --- 7. GRAPHICS RENDERER (HORIZON FIX) ---
+        // --- 7. CUSTOM HIGH-FIDELITY GRAPHICS ---
         function customRender() {
             if (mode !== 'flight') return;
             const ctx = render.context;
@@ -473,13 +483,12 @@
             let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x);
             let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
 
+            // Manual Planet Render (Avoids Canvas WebGL crash)
             ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); 
-            
             let pScreenX = (0 - bounds.min.x) * scaleX;
             let pScreenY = (0 - bounds.min.y) * scaleY;
             let pScreenRadius = PLANET_RADIUS * scaleX;
             
-            // THE CANVAS HORIZON FIX: If circle is too big for GPU, draw a flat horizon line
             if (pScreenRadius > 10000) {
                 let planetTopY = (PLANET_POS.y - PLANET_RADIUS - bounds.min.y) * scaleY;
                 ctx.fillStyle = '#0a1410'; ctx.fillRect(0, planetTopY, window.innerWidth, window.innerHeight * 2);
@@ -497,11 +506,10 @@
                 ctx.fillRect((0 - 1000 - bounds.min.x)*scaleX, padTopY, 2000*scaleX, 40*scaleY);
             }
 
-            // Predictive Trajectory
             if (isMapView) {
                 let path = getPredictivePath();
                 if (path.length > 1) {
-                    ctx.beginPath(); ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 4;
+                    ctx.beginPath(); ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 3;
                     path.forEach((p, i) => {
                         let sx = (p.x - bounds.min.x) * scaleX, sy = (p.y - bounds.min.y) * scaleY;
                         if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
@@ -510,7 +518,7 @@
             }
             ctx.restore();
 
-            // Draw Ships
+            // Draw Ships with Custom Graphics
             shipBodies.forEach((body, idx) => {
                 let isMain = (idx === activeShipIndex);
 
@@ -524,26 +532,28 @@
                 } else if (isMapView) return;
 
                 body.parts.forEach((sub, i) => {
-                    if (i === 0 && body.parts.length > 1) return; // Skip hull
+                    if (i === 0 && body.parts.length > 1) return; // Skip Matter.js hull bounds
                     let d = sub.partData; if(!d) return;
 
                     ctx.save();
                     ctx.translate(sub.position.x, sub.position.y);
                     ctx.rotate(sub.angle);
 
+                    // PROPER GRAPHICS
                     if(d.type === 'pod') {
-                        ctx.fillStyle = '#cbd5e1'; ctx.beginPath();
+                        // Aerodynamic Cone
+                        ctx.fillStyle = '#e2e8f0'; ctx.beginPath();
                         ctx.moveTo(0, -d.h/2); ctx.lineTo(d.w/2, d.h/2); ctx.lineTo(-d.w/2, d.h/2); ctx.closePath(); ctx.fill();
-                        ctx.fillStyle = '#1e293b'; ctx.fillRect(-10, -5, 20, 15); 
+                        ctx.fillStyle = '#0f172a'; ctx.fillRect(-10, 5, 20, 10); // Window
                     } else if (d.type === 'tank') {
-                        let grad = ctx.createLinearGradient(-d.w/2, 0, d.w/2, 0);
-                        grad.addColorStop(0, '#c2410c'); grad.addColorStop(0.5, '#ea580c'); grad.addColorStop(1, '#c2410c');
-                        ctx.fillStyle = grad; ctx.fillRect(-d.w/2, -d.h/2, d.w, d.h);
-                        ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(-d.w/2, -d.h/2, d.w, 4); ctx.fillRect(-d.w/2, d.h/2-4, d.w, 4); 
+                        // Cylinder with Red Stripes
+                        ctx.fillStyle = '#cbd5e1'; ctx.fillRect(-d.w/2, -d.h/2, d.w, d.h);
+                        ctx.fillStyle = '#dc2626'; ctx.fillRect(-d.w/2, -d.h/2, 5, d.h); ctx.fillRect(d.w/2 - 5, -d.h/2, 5, d.h);
                     } else if (d.type === 'engine') {
-                        ctx.fillStyle = '#475569'; ctx.fillRect(-d.w/3, -d.h/2, d.w*(2/3), d.h/3); 
+                        // Swept Bell
+                        ctx.fillStyle = '#475569'; ctx.fillRect(-d.w/4, -d.h/2, d.w/2, d.h/2); 
                         ctx.fillStyle = '#1e293b'; ctx.beginPath(); 
-                        ctx.moveTo(-d.w/4, -d.h/6); ctx.lineTo(d.w/4, -d.h/6); ctx.lineTo(d.w/2, d.h/2); ctx.lineTo(-d.w/2, d.h/2); ctx.closePath(); ctx.fill();
+                        ctx.moveTo(-d.w/4, 0); ctx.lineTo(d.w/2, d.h/2); ctx.lineTo(-d.w/2, d.h/2); ctx.closePath(); ctx.fill();
                         
                         if(d.isBurning) {
                             ctx.fillStyle = '#ffaa00'; ctx.beginPath();
@@ -552,7 +562,7 @@
                             ctx.arc(0, d.h/2 + 5, d.w/4, 0, Math.PI*2); ctx.fill();
                         }
                     } else if (d.type === 'decoupler') {
-                        ctx.fillStyle = '#334155'; ctx.fillRect(-d.w/2, -d.h/2, d.w, d.h);
+                        ctx.fillStyle = '#1e293b'; ctx.fillRect(-d.w/2, -d.h/2, d.w, d.h);
                         ctx.fillStyle = '#eab308'; ctx.fillRect(-d.w/2, 0, d.w, 2); 
                     } else if (d.type === 'radial') {
                         ctx.fillStyle = '#475569'; ctx.beginPath();
