@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Final Polish</title>
+    <title>Orbital Rocket Simulator - Predictive Trajectories</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -97,8 +97,7 @@
         const ATMOSPHERE_HEIGHT = 50000; 
         
         let isMapView = false;
-        let trajectory = [];
-        let tickCounter = 0;
+        let mapCameraViewSpan = PLANET_RADIUS * 1.3; 
 
         updateUI();
 
@@ -180,7 +179,6 @@
             document.getElementById('clamp-warning').style.display = 'block';
             isLaunched = false;
             isMapView = false;
-            trajectory = [];
             initPhysics();
         }
 
@@ -252,8 +250,6 @@
             initiateLaunchSequence(); 
             if (currentStageIndex < 0) return;
 
-            // --- THE STAGE FAST-FORWARD FIX ---
-            // Instantly skip tanks and engines until a separation event is found
             while (currentStageIndex >= 0) {
                 let stagePartData = activeShip.partsData[currentStageIndex];
                 let uiEl = document.getElementById(`stage-ui-${currentStageIndex}`);
@@ -298,9 +294,9 @@
                     Body.applyForce(debris, debris.position, {x: -Math.sin(oldAngle)*sepForce, y: Math.cos(oldAngle)*sepForce});
                     
                     currentStageIndex--;
-                    break; // Successfully physically separated!
+                    break; 
                 } else {
-                    currentStageIndex--; // Skip and check next part instantly
+                    currentStageIndex--; 
                 }
             }
             updateActiveEngine(); 
@@ -360,7 +356,6 @@
                 let fuelToDrain = engineData.fuelDrain || 1.0;
                 let hasDrainedFuel = false;
 
-                // Absolute strict isolation - only drain from current stage bounds
                 for(let i = stageEndIndex; i >= stageStartIndex; i--) {
                     let p = activeShip.partsData[i];
                     if(p.type === 'tank' && p.fuelRemaining > 0) {
@@ -390,7 +385,7 @@
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006);
             }
 
-            // 4. Calculate Stage Telemetry 
+            // 4. Calculate Telemetry 
             let stageFuelMax = 0;
             let stageFuelRemaining = 0;
             if (activeEngineLocalIndex !== -1) {
@@ -413,23 +408,17 @@
             document.getElementById('tel-atmo').innerText = atmoPercentDisplay + '%';
             document.getElementById('tel-fuel').innerText = fuelPercentage + '%';
 
-            // 5. Track Trajectory
-            tickCounter++;
-            if(tickCounter % 30 === 0 && isLaunched) {
-                trajectory.push({x: activeShip.position.x, y: activeShip.position.y});
-                if(trajectory.length > 5000) trajectory.shift(); 
-            }
-
-            // 6. Camera System
+            // 5. Camera System
             if(isMapView) {
                 let dx = Math.abs(activeShip.position.x - PLANET_POS.x);
                 let dy = Math.abs(activeShip.position.y - PLANET_POS.y);
                 let shipDist = Math.sqrt(dx*dx + dy*dy);
-                let viewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.3; 
+                
+                mapCameraViewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.3; 
                 
                 Render.lookAt(render, {
-                    min: { x: PLANET_POS.x - viewSpan, y: PLANET_POS.y - viewSpan },
-                    max: { x: PLANET_POS.x + viewSpan, y: PLANET_POS.y + viewSpan }
+                    min: { x: PLANET_POS.x - mapCameraViewSpan, y: PLANET_POS.y - mapCameraViewSpan },
+                    max: { x: PLANET_POS.x + mapCameraViewSpan, y: PLANET_POS.y + mapCameraViewSpan }
                 });
             } else {
                 let targetZoom = 1 + (Math.max(0, altitudeRaw) * 0.0001);
@@ -441,39 +430,97 @@
             }
         }
 
+        // --- PREDICTIVE ORBIT CALCULATOR ---
+        function calculatePredictedTrajectory() {
+            if (!activeShip || !isLaunched) return [];
+            
+            // Clone current physics state
+            let simPos = { x: activeShip.position.x, y: activeShip.position.y };
+            let simVel = { x: activeShip.velocity.x, y: activeShip.velocity.y };
+            let path = [];
+            
+            // To see further into the future without freezing the browser, we use a larger dt multiplier
+            // This approximates the integration thousands of frames forward instantly
+            let dt = 3; 
+
+            for(let i=0; i < 4000; i++) {
+                // Save a visual point every N steps to build the line
+                if (i % 5 === 0) path.push({x: simPos.x, y: simPos.y});
+
+                let dirX = PLANET_POS.x - simPos.x;
+                let dirY = PLANET_POS.y - simPos.y;
+                let distSq = dirX*dirX + dirY*dirY;
+                let dist = Math.sqrt(distSq);
+
+                if (dist < PLANET_RADIUS) {
+                    path.push({x: simPos.x, y: simPos.y}); // Hit ground
+                    break; 
+                }
+
+                // Simulate Atmospheric Drag
+                let atmoDensity = Math.max(0, 1 - ((dist - PLANET_RADIUS) / ATMOSPHERE_HEIGHT));
+                let friction = 1 - (0.02 * atmoDensity * dt);
+                simVel.x *= Math.max(0, friction);
+                simVel.y *= Math.max(0, friction);
+
+                // Simulate Gravity
+                let forceMag = GRAVITY_CONSTANT / distSq; // force/mass = acceleration
+                let accX = (dirX / dist) * forceMag;
+                let accY = (dirY / dist) * forceMag;
+
+                // Step Euler Integration
+                simVel.x += accX * dt;
+                simVel.y += accY * dt;
+                simPos.x += simVel.x * dt;
+                simPos.y += simVel.y * dt;
+            }
+            return path;
+        }
+
         function customRender() {
             if (mode !== 'flight') return;
             const ctx = render.context;
             
-            // --- THE MAP VIEW RENDERING FIX ---
-            // Bypasses Matter.js hardware clamping by mapping directly to screen space pixels
-            let bounds = render.bounds;
-            let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x);
-            let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
+            let currentScale = isMapView ? (mapCameraViewSpan * 2) : (render.bounds.max.x - render.bounds.min.x);
+            let baseScale = window.innerWidth;
+            
+            // Only draw the trajectory IF we are in Map View
+            if (isMapView && isLaunched) {
+                let predictedPath = calculatePredictedTrajectory();
+                let dynamicLineWidth = currentScale * 0.003; 
 
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset entirely to Screen Coordinates
+                if (predictedPath.length > 1) {
+                    ctx.save();
+                    ctx.setTransform(1, 0, 0, 1, 0, 0); // Lock to screen space to prevent hardware limit clipping
+                    
+                    let scaleX = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
+                    let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
 
-            // 1. Draw Trajectory Trail
-            if (trajectory.length > 1) {
-                ctx.beginPath();
-                ctx.strokeStyle = 'rgba(255, 50, 50, 0.9)';
-                ctx.lineWidth = isMapView ? 6 : 3; // Guaranteed fixed thickness in pure pixels
-                
-                for(let i = 0; i < trajectory.length; i++) {
-                    let sx = (trajectory[i].x - bounds.min.x) * scaleX;
-                    let sy = (trajectory[i].y - bounds.min.y) * scaleY;
-                    if(i===0) ctx.moveTo(sx, sy);
-                    else ctx.lineTo(sx, sy);
+                    ctx.beginPath();
+                    ctx.strokeStyle = 'rgba(0, 200, 255, 0.8)'; // Bright Cyan for predicted path
+                    ctx.lineWidth = Math.max(2, dynamicLineWidth); // Never goes below 2 real pixels
+                    
+                    for(let i = 0; i < predictedPath.length; i++) {
+                        let sx = (predictedPath[i].x - render.bounds.min.x) * scaleX;
+                        let sy = (predictedPath[i].y - render.bounds.min.y) * scaleY;
+                        if(i === 0) ctx.moveTo(sx, sy);
+                        else ctx.lineTo(sx, sy);
+                    }
+                    ctx.stroke();
+                    ctx.restore();
                 }
-                ctx.stroke();
             }
 
-            // 2. Draw Tactical Map Marker
+            // Draw Map UI Marker
             if (isMapView && activeShip) {
-                let sx = (activeShip.position.x - bounds.min.x) * scaleX;
-                let sy = (activeShip.position.y - bounds.min.y) * scaleY;
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0); 
                 
+                let scaleX = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
+                let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
+                let sx = (activeShip.position.x - render.bounds.min.x) * scaleX;
+                let sy = (activeShip.position.y - render.bounds.min.y) * scaleY;
+
                 ctx.translate(sx, sy);
                 
                 // Pulsing Halo
@@ -482,8 +529,9 @@
                 ctx.arc(0, 0, 25, 0, 2*Math.PI);
                 ctx.fill();
 
-                // Directional Ship Pointer
                 ctx.rotate(activeShip.angle);
+                
+                // Neon Ship Icon
                 ctx.fillStyle = '#00ffcc';
                 ctx.beginPath();
                 ctx.moveTo(0, -15); 
@@ -492,17 +540,18 @@
                 ctx.closePath();
                 ctx.fill();
                 
-                // Map Engine Fire
+                // Engine Fire on Map
                 if (isEngineBurning) {
                     ctx.fillStyle = '#ff4400';
                     ctx.beginPath();
                     ctx.arc(0, 22, 8, 0, 2*Math.PI);
                     ctx.fill();
                 }
+                
+                ctx.restore();
             }
-            ctx.restore();
 
-            // 3. Draw standard Action View Exhaust
+            // Draw standard exhaust in Action View
             if (isEngineBurning && activeEngineLocalIndex !== -1 && !isMapView) {
                 let engineSubBody = activeShip.parts[activeEngineLocalIndex + 1];
                 if(engineSubBody) {
