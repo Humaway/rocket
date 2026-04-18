@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Stable Trajectories</title>
+    <title>Orbital Rocket Simulator - True Predictive Orbits</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -93,7 +93,7 @@
         let planetBody;
         const PLANET_RADIUS = 500000; 
         const PLANET_POS = { x: 0, y: 0 }; 
-        const GRAVITY_CONSTANT = 250000000; 
+        const GRAVITY_CONSTANT = 250000000; // Translates to exactly 0.001 G per unit mass at surface
         const ATMOSPHERE_HEIGHT = 50000; 
         
         let isMapView = false;
@@ -114,11 +114,14 @@
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
             } else if (type === 'vacuum') {
-                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.001, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
+                // TWR < 1 at sea level. Strictly for orbital maneuvers.
+                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.0015, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
             } else if (type === 'booster') {
-                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.006, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
+                // Balanced for small-medium launch vehicles
+                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.005, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
             } else if (type === 'heavy') {
-                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.018, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
+                // Massive thrust for heavy payloads, burns fuel extremely fast
+                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.010, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
             }
             
             rocketParts.push(JSON.parse(JSON.stringify(part)));
@@ -424,7 +427,8 @@
                 let dy = Math.abs(activeShip.position.y - PLANET_POS.y);
                 let shipDist = Math.sqrt(dx*dx + dy*dy);
                 
-                mapCameraViewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.3; 
+                // Dynamically expand the map to fit exactly what we need to see
+                mapCameraViewSpan = Math.max(shipDist, PLANET_RADIUS) * 1.5; 
                 
                 Render.lookAt(render, {
                     min: { x: PLANET_POS.x - mapCameraViewSpan, y: PLANET_POS.y - mapCameraViewSpan },
@@ -440,7 +444,7 @@
             }
         }
 
-        // --- STABILIZED PREDICTIVE ORBIT CALCULATOR ---
+        // --- MASSIVE PREDICTIVE ORBIT CALCULATOR ---
         function calculatePredictedTrajectory() {
             if (!activeShip || !isLaunched) return [];
             
@@ -448,10 +452,10 @@
             let simVel = { x: activeShip.velocity.x, y: activeShip.velocity.y };
             let path = [];
             
-            // Fast-forward time integration
-            let dt = 1.5; 
-            let maxSteps = 3000;
-            let drawInterval = 10; 
+            // Hyper-fast integration. Predicts 200,000 ticks (a full massive orbit) instantly.
+            let dt = 25; 
+            let maxSteps = 8000; 
+            let drawInterval = 40; 
 
             for(let i=0; i < maxSteps; i++) {
                 if (i % drawInterval === 0) path.push({x: simPos.x, y: simPos.y});
@@ -461,39 +465,39 @@
                 let distSq = dirX*dirX + dirY*dirY;
                 let dist = Math.sqrt(distSq);
 
-                // Stop if ghost ship crashes into the ground
+                // Ground Collision Stop
                 if (dist < PLANET_RADIUS) {
                     path.push({x: simPos.x, y: simPos.y}); 
                     break; 
                 }
-                
-                // Stop if ghost ship escapes the system to prevent runaway math
-                if (dist > PLANET_RADIUS * 5) {
+
+                // Escape Velocity Stop (Prevents runaway lines)
+                if (dist > PLANET_RADIUS * 4) {
+                    path.push({x: simPos.x, y: simPos.y}); 
                     break;
                 }
 
-                // Simulate Gravity (Capped to prevent NaN explosions near the surface)
+                // Gravity (capped near surface to prevent NaN explosions on collision)
                 let safeDistSq = Math.max(distSq, PLANET_RADIUS * PLANET_RADIUS);
                 let forceMag = GRAVITY_CONSTANT / safeDistSq; 
-                
                 let accX = (dirX / dist) * forceMag;
                 let accY = (dirY / dist) * forceMag;
 
-                // Simulate Atmospheric Drag
+                // Atmo Drag
                 if (dist < PLANET_RADIUS + ATMOSPHERE_HEIGHT) {
                     let atmoDensity = Math.max(0, 1 - ((dist - PLANET_RADIUS) / ATMOSPHERE_HEIGHT));
-                    let friction = 1 - (0.02 * atmoDensity * dt); 
-                    simVel.x *= Math.max(0, friction);
-                    simVel.y *= Math.max(0, friction);
+                    let friction = Math.pow(1 - (0.02 * atmoDensity), dt); 
+                    simVel.x *= friction;
+                    simVel.y *= friction;
                 }
 
-                // Step Euler Integration
+                // Symplectic Euler Integration (Stable for orbits)
                 simVel.x += accX * dt;
                 simVel.y += accY * dt;
                 simPos.x += simVel.x * dt;
                 simPos.y += simVel.y * dt;
                 
-                // Final safety check against NaN poisoning
+                // Final safety check
                 if(isNaN(simPos.x) || isNaN(simPos.y)) break;
             }
             return path;
@@ -503,74 +507,65 @@
             if (mode !== 'flight') return;
             const ctx = render.context;
             
-            let currentScale = isMapView ? (mapCameraViewSpan * 2) : (render.bounds.max.x - render.bounds.min.x);
-            let baseScale = window.innerWidth;
-            
-            // Historical Trajectory
-            let histLineWidth = isMapView ? Math.max(40, (currentScale / baseScale) * 15) : Math.max(5, (currentScale / baseScale) * 5);
-            if (trajectory.length > 1) {
-                ctx.beginPath();
-                ctx.moveTo(trajectory[0].x, trajectory[0].y);
-                for(let i = 1; i < trajectory.length; i++) { ctx.lineTo(trajectory[i].x, trajectory[i].y); }
-                ctx.strokeStyle = 'rgba(255, 50, 50, 0.4)'; // Faded red for historical path
-                ctx.lineWidth = histLineWidth; 
-                ctx.stroke();
-            }
+            let scaleX = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
+            let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
 
-            // ONLY draw Predictive Path in Map View
+            // 1. Draw Predictive Trajectory (Only in Map View)
             if (isMapView && isLaunched) {
                 let predictedPath = calculatePredictedTrajectory();
-                let predLineWidth = Math.max(10, (currentScale / baseScale) * 8);
-
                 if (predictedPath.length > 1) {
                     ctx.save();
-                    ctx.setTransform(1, 0, 0, 1, 0, 0); // Lock to true screen space to prevent canvas hardware clamping
-                    
-                    let scaleX = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
-                    let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
-
+                    ctx.setTransform(1, 0, 0, 1, 0, 0); // Absolute screen space rendering
                     ctx.beginPath();
-                    ctx.strokeStyle = 'rgba(0, 200, 255, 0.9)'; // Bright Cyan for predicted future orbit
-                    ctx.lineWidth = 4; // Always 4 pure pixels thick on the monitor
+                    ctx.strokeStyle = 'rgba(0, 200, 255, 0.9)'; // Bright Cyan
+                    ctx.lineWidth = 4; // Always 4 pure pixels thick on the screen
                     
                     for(let i = 0; i < predictedPath.length; i++) {
                         let sx = (predictedPath[i].x - render.bounds.min.x) * scaleX;
                         let sy = (predictedPath[i].y - render.bounds.min.y) * scaleY;
                         
-                        // Safety bound against extreme screen coordinates
-                        if(sx > -5000 && sx < window.innerWidth + 5000 && sy > -5000 && sy < window.innerHeight + 5000) {
-                            if(i === 0) ctx.moveTo(sx, sy);
-                            else ctx.lineTo(sx, sy);
-                        }
+                        if(i === 0) ctx.moveTo(sx, sy);
+                        else ctx.lineTo(sx, sy);
                     }
                     ctx.stroke();
                     ctx.restore();
                 }
             }
 
-            // Tactical Map UI Marker
+            // 2. Draw Historical Trail
+            let currentScale = isMapView ? (mapCameraViewSpan * 2) : (render.bounds.max.x - render.bounds.min.x);
+            let baseScale = window.innerWidth;
+            let histLineWidth = isMapView ? Math.max(15, (currentScale / baseScale) * 8) : Math.max(3, (currentScale / baseScale) * 3);
+
+            if (trajectory.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(trajectory[0].x, trajectory[0].y);
+                for(let i = 1; i < trajectory.length; i++) { ctx.lineTo(trajectory[i].x, trajectory[i].y); }
+                ctx.strokeStyle = 'rgba(255, 50, 50, 0.4)'; // Faded Red
+                ctx.lineWidth = histLineWidth; 
+                ctx.stroke();
+            }
+
+            // 3. Draw Map Ship Marker
             if (isMapView && activeShip) {
                 ctx.save();
-                ctx.setTransform(1, 0, 0, 1, 0, 0); // Screen space locking
+                ctx.setTransform(1, 0, 0, 1, 0, 0); 
                 
-                let scaleX = window.innerWidth / (render.bounds.max.x - render.bounds.min.x);
-                let scaleY = window.innerHeight / (render.bounds.max.y - render.bounds.min.y);
                 let sx = (activeShip.position.x - render.bounds.min.x) * scaleX;
                 let sy = (activeShip.position.y - render.bounds.min.y) * scaleY;
-
                 ctx.translate(sx, sy);
                 
-                let markerSize = 15; // Always exactly 15 pure pixels on monitor
+                let markerSize = 15; 
                 
                 // Pulsing Halo
-                ctx.fillStyle = 'rgba(0, 255, 204, 0.3)';
+                ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
                 ctx.beginPath();
                 ctx.arc(0, 0, markerSize * 2, 0, 2*Math.PI);
                 ctx.fill();
 
                 ctx.rotate(activeShip.angle);
                 
-                // Neon Ship Icon
+                // Neon Triangle
                 ctx.fillStyle = '#00ffcc';
                 ctx.beginPath();
                 ctx.moveTo(0, -markerSize); 
@@ -579,7 +574,6 @@
                 ctx.closePath();
                 ctx.fill();
                 
-                // Engine Fire on Map
                 if (isEngineBurning) {
                     ctx.fillStyle = '#ff4400';
                     ctx.beginPath();
@@ -590,7 +584,7 @@
                 ctx.restore();
             }
 
-            // Standard Action View Exhaust
+            // 4. Action View Exhaust
             if (isEngineBurning && activeEngineLocalIndex !== -1 && !isMapView) {
                 let engineSubBody = activeShip.parts[activeEngineLocalIndex + 1];
                 if(engineSubBody) {
