@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Macro Scale</title>
+    <title>Orbital Rocket Simulator - Heavy Lift</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #02040a; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -48,7 +48,8 @@
                 <button class="btn" onclick="addPart('tank')">+ Fuel Tank</button>
                 <button class="btn" onclick="addPart('decoupler')">+ Decoupler</button>
                 <button class="btn" style="border-color: #4444ff;" onclick="addPart('vacuum')">+ Vacuum Engine</button>
-                <button class="btn" style="border-color: #ff2222;" onclick="addPart('booster')">+ Booster Engine</button>
+                <button class="btn" style="border-color: #ffaa00;" onclick="addPart('booster')">+ Standard Booster</button>
+                <button class="btn" style="border-color: #ff2222; background: #3a1515;" onclick="addPart('heavy')">+ Heavy Lift Engine</button>
                 <button class="btn" onclick="resetBuild()" style="background: #4a1515; border-color: #ff4444; margin-top:5px;">Clear Rocket</button>
             </div>
             <div class="visualizer-col" id="blueprint-visualizer"></div>
@@ -91,10 +92,10 @@
         
         // --- MACRO SCALE PLANET ---
         let planetBody;
-        const PLANET_RADIUS = 500000; // Massively scaled for realistic curvature and long flights
+        const PLANET_RADIUS = 500000; 
         const PLANET_POS = { x: 0, y: 0 }; 
-        const GRAVITY_CONSTANT = 250000000; // Calibrated for smooth 1g surface pull at 500k radius
-        const ATMOSPHERE_HEIGHT = 50000; // Thick atmosphere to fight through
+        const GRAVITY_CONSTANT = 250000000; 
+        const ATMOSPHERE_HEIGHT = 50000; 
         
         let isMapView = false;
         let trajectory = [];
@@ -109,13 +110,16 @@
                 rocketParts.unshift({ type: 'parachute', name: 'Parachute', mass: 0.1, height: 15, width: 20, color: '#ff4444' });
                 updateUI(); return;
             } else if (type === 'tank') {
-                part = { type: 'tank', name: 'Fuel Tank', mass: 0.8, fuelCapacity: 1500, fuelRemaining: 1500, height: 60, width: 40, color: '#ff8800' };
+                part = { type: 'tank', name: 'Fuel Tank', mass: 0.6, fuelCapacity: 2000, fuelRemaining: 2000, height: 60, width: 40, color: '#ff8800' };
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
-            } else if (type === 'booster') {
-                part = { type: 'engine', name: 'Booster', mass: 1.2, thrust: 0.0035, fuelDrain: 2.0, height: 45, width: 28, color: '#ff2222' }; 
             } else if (type === 'vacuum') {
-                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.0008, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
+                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.001, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
+            } else if (type === 'booster') {
+                part = { type: 'engine', name: 'Booster', mass: 1.0, thrust: 0.006, fuelDrain: 2.0, height: 45, width: 28, color: '#ffaa00' }; 
+            } else if (type === 'heavy') {
+                // The Heavy Lifter: Massive thrust for huge multi-stage rockets, extremely thirsty.
+                part = { type: 'engine', name: 'Heavy Lift', mass: 2.5, thrust: 0.018, fuelDrain: 6.0, height: 55, width: 36, color: '#ff2222' }; 
             }
             
             rocketParts.push(JSON.parse(JSON.stringify(part)));
@@ -386,7 +390,7 @@
             document.getElementById('tel-atmo').innerText = atmoPercentDisplay + '%';
             document.getElementById('tel-fuel').innerText = fuelPercentage + '%';
 
-            // 5. Track Trajectory (Extended to 5000 points for massive orbits)
+            // 5. Track Trajectory
             tickCounter++;
             if(tickCounter % 30 === 0 && isLaunched) {
                 trajectory.push({x: activeShip.position.x, y: activeShip.position.y});
@@ -395,7 +399,6 @@
 
             // 6. Camera System
             if(isMapView) {
-                // Focus entirely on fitting the planet and the ship
                 let dx = Math.abs(activeShip.position.x - PLANET_POS.x);
                 let dy = Math.abs(activeShip.position.y - PLANET_POS.y);
                 let shipDist = Math.sqrt(dx*dx + dy*dy);
@@ -419,14 +422,11 @@
             if (mode !== 'flight') return;
             const ctx = render.context;
             
-            // Screen scale logic
             let currentScale = render.bounds.max.x - render.bounds.min.x;
             let baseScale = window.innerWidth;
             
-            // Map-specific visibility overrides
             let dynamicLineWidth = isMapView ? Math.max(40, (currentScale / baseScale) * 15) : Math.max(5, (currentScale / baseScale) * 5);
 
-            // Draw Trajectory
             if (trajectory.length > 1) {
                 ctx.beginPath();
                 ctx.moveTo(trajectory[0].x, trajectory[0].y);
@@ -436,24 +436,21 @@
                 ctx.stroke();
             }
 
-            // TACTICAL MAP OVERLAY: Draw giant neon ship marker
             if (isMapView && activeShip) {
-                let markerSize = currentScale * 0.015; // Always scales to be prominent on screen
+                let markerSize = currentScale * 0.015; 
                 
                 ctx.save();
                 ctx.translate(activeShip.position.x, activeShip.position.y);
                 ctx.rotate(activeShip.angle);
                 
-                // Draw Cyan Triangle
                 ctx.fillStyle = '#00ffcc';
                 ctx.beginPath();
-                ctx.moveTo(0, -markerSize); // Nose
-                ctx.lineTo(markerSize/2, markerSize); // Right base
-                ctx.lineTo(-markerSize/2, markerSize); // Left base
+                ctx.moveTo(0, -markerSize); 
+                ctx.lineTo(markerSize/2, markerSize); 
+                ctx.lineTo(-markerSize/2, markerSize); 
                 ctx.closePath();
                 ctx.fill();
                 
-                // Draw engine fire on the map marker if burning
                 if (isEngineBurning) {
                     ctx.fillStyle = '#ff4400';
                     ctx.beginPath();
@@ -464,7 +461,6 @@
                 ctx.restore();
             }
 
-            // Standard Action View Exhaust
             if (isEngineBurning && activeEngineLocalIndex !== -1 && !isMapView) {
                 let engineSubBody = activeShip.parts[activeEngineLocalIndex + 1];
                 if(engineSubBody) {
@@ -473,7 +469,9 @@
                     let exY = engineSubBody.position.y + Math.cos(activeShip.angle) * (engineData.height/2 + 5);
                     ctx.fillStyle = Math.random() > 0.5 ? '#ffaa00' : '#ff4400';
                     ctx.beginPath();
-                    let exhaustSize = engineData.name === 'Booster' ? (15 + Math.random()*10) : (8 + Math.random()*5);
+                    let exhaustSize = engineData.name === 'Heavy Lift' ? (20 + Math.random()*15) : 
+                                      engineData.name === 'Booster' ? (15 + Math.random()*10) : 
+                                      (8 + Math.random()*5);
                     ctx.arc(exX, exY, exhaustSize, 0, 2*Math.PI);
                     ctx.fill();
                 }
