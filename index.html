@@ -3,263 +3,198 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Rocket Builder & Simulator</title>
+    <title>Simple Rocket Builder & Simulator V2</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #0a0a1a;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: white;
-        }
-
-        #game-canvas {
-            width: 100%;
-            height: 100%;
-            display: block;
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #4da8da; /* Sky color start */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white;
+            transition: background-color 0.5s;
         }
 
         .panel {
-            position: absolute;
-            background: rgba(15, 20, 35, 0.9);
-            border: 1px solid #334;
-            border-radius: 8px;
-            padding: 15px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            backdrop-filter: blur(4px);
+            position: absolute; background: rgba(15, 20, 35, 0.9);
+            border: 1px solid #334; border-radius: 8px; padding: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); backdrop-filter: blur(4px);
         }
 
-        /* Assembly UI - Left Side */
+        /* Assembly UI */
         #build-ui {
-            top: 20px;
-            left: 20px;
-            width: 260px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+            top: 20px; left: 20px; width: 350px; display: flex; flex-direction: column; gap: 10px;
         }
 
-        /* Telemetry UI - Right Side */
         #flight-ui {
-            top: 20px;
-            right: 20px;
-            width: 250px;
-            display: none;
-            flex-direction: column;
-            gap: 15px;
+            top: 20px; right: 20px; width: 250px; display: none; flex-direction: column; gap: 15px;
         }
 
-        h2, h3 {
-            margin: 0 0 10px 0;
-            font-size: 1.2rem;
-            color: #4da8da;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
+        h2, h3 { margin: 0 0 10px 0; font-size: 1.2rem; color: #4da8da; text-transform: uppercase; letter-spacing: 1px; }
 
         .btn {
-            background: #2a3b5c;
-            color: white;
-            border: 1px solid #4da8da;
-            padding: 10px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.2s;
+            background: #2a3b5c; color: white; border: 1px solid #4da8da;
+            padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: all 0.2s;
         }
-
         .btn:hover { background: #4da8da; color: #000; }
         .btn-launch { background: #28a745; border-color: #28a745; margin-top: 15px; }
         .btn-launch:hover { background: #218838; color: white; }
 
+        .build-container { display: flex; gap: 15px; align-items: flex-start; }
+        .controls-col { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+        .visualizer-col { width: 80px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-height: 250px; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 10px; border: 1px dashed #556; }
+
         /* Staging List */
-        #stage-list {
-            background: rgba(0,0,0,0.5);
-            border-radius: 4px;
-            padding: 10px;
-            max-height: 200px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        .stage-item {
-            background: #1e293b;
-            padding: 5px 10px;
-            border-radius: 3px;
-            font-size: 0.9rem;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        .stage-active {
-            border-left: 3px solid #28a745;
-            background: #2a3b5c;
-        }
+        #stage-list { background: rgba(0,0,0,0.5); border-radius: 4px; padding: 10px; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
+        .stage-item { background: #1e293b; padding: 5px 10px; border-radius: 3px; font-size: 0.9rem; }
+        .stage-active { border-left: 3px solid #28a745; background: #2a3b5c; }
 
         /* Telemetry Elements */
-        .telemetry-row {
-            display: flex;
-            justify-content: space-between;
-            border-bottom: 1px solid #334;
-            padding-bottom: 5px;
-            font-family: monospace;
-            font-size: 1.1rem;
-        }
-
+        .telemetry-row { display: flex; justify-content: space-between; border-bottom: 1px solid #334; padding-bottom: 5px; font-family: monospace; font-size: 1.1rem; }
         .telemetry-label { color: #8892b0; }
 
-        /* Atmosphere Meter */
-        .meter-container {
-            height: 15px;
-            background: #111;
-            border: 1px solid #444;
-            border-radius: 8px;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        .meter-fill {
-            height: 100%;
-            width: 100%;
-            background: linear-gradient(90deg, #4da8da 0%, #0a0a1a 100%);
-            transition: width 0.1s linear;
-        }
+        .meter-container { height: 15px; background: #111; border: 1px solid #444; border-radius: 8px; overflow: hidden; position: relative; }
+        .meter-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #4da8da 0%, #0a0a1a 100%); transition: width 0.1s linear; }
 
         #controls-help {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.7);
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            display: none;
-            color: #ccc;
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px; font-size: 0.9rem; display: none; color: #ccc; z-index: 10;
         }
+
+        /* Blueprint Visuals */
+        .bp-part { border: 1px solid rgba(255,255,255,0.2); width: 100%; text-align: center; font-size: 0.6rem; display: flex; align-items: center; justify-content: center; overflow: hidden;}
     </style>
 </head>
 <body>
 
     <div id="build-ui" class="panel">
         <h2>Assembly Bay</h2>
-        <p style="font-size: 0.85rem; color: #aaa; margin: 0 0 10px 0;">Build top to bottom. Command Pod is pre-installed.</p>
-        
-        <button class="btn" onclick="addPart('parachute')">+ Add Parachute</button>
-        <button class="btn" onclick="addPart('tank')">+ Add Fuel Tank</button>
-        <button class="btn" onclick="addPart('decoupler')">+ Add Decoupler</button>
-        <button class="btn" onclick="addPart('engine')">+ Add Rocket Engine</button>
-        
-        <h3 style="margin-top: 15px;">Staging Stack</h3>
-        <div id="stage-list">
+        <div class="build-container">
+            <div class="controls-col">
+                <button class="btn" onclick="addParachute()">+ Parachute (Top)</button>
+                <button class="btn" onclick="addPart('tank')">+ Fuel Tank</button>
+                <button class="btn" onclick="addPart('decoupler')">+ Decoupler</button>
+                <button class="btn" onclick="addPart('engine')">+ Rocket Engine</button>
+                <button class="btn" onclick="resetBuild()" style="background: #662222; border-color: #ff4444; margin-top:10px;">Clear Rocket</button>
             </div>
-
+            <div class="visualizer-col" id="blueprint-visualizer">
+                </div>
+        </div>
+        
+        <h3 style="margin-top: 15px;">Staging Stack (Bottom Up)</h3>
+        <div id="stage-list"></div>
         <button class="btn btn-launch" onclick="launch()">INITIATE LAUNCH</button>
     </div>
 
     <div id="flight-ui" class="panel">
         <h2>Telemetry</h2>
-        
-        <div class="telemetry-row">
-            <span class="telemetry-label">ALTITUDE</span>
-            <span id="tel-alt">0 m</span>
-        </div>
-        
-        <div class="telemetry-row">
-            <span class="telemetry-label">SPEED</span>
-            <span id="tel-spd">0 m/s</span>
-        </div>
-        
-        <div class="telemetry-row">
-            <span class="telemetry-label">FUEL</span>
-            <span id="tel-fuel">100%</span>
-        </div>
-
+        <div class="telemetry-row"><span class="telemetry-label">ALTITUDE</span><span id="tel-alt">0 m</span></div>
+        <div class="telemetry-row"><span class="telemetry-label">SPEED</span><span id="tel-spd">0 m/s</span></div>
+        <div class="telemetry-row"><span class="telemetry-label">FUEL</span><span id="tel-fuel">100%</span></div>
         <div style="margin-top: 10px;">
             <div class="telemetry-label" style="margin-bottom: 5px; font-size: 0.9rem;">ATMOSPHERE DENSITY</div>
-            <div class="meter-container">
-                <div id="atmo-meter" class="meter-fill"></div>
-            </div>
+            <div class="meter-container"><div id="atmo-meter" class="meter-fill"></div></div>
         </div>
     </div>
 
-    <div id="controls-help">
-        [W / UP] Thrust | [A / D] Steer | [SPACE] Next Stage
-    </div>
+    <div id="controls-help">[W / UP] Thrust | [A / D] Steer | [SPACE] Trigger Next Stage</div>
 
     <script>
-        // Matter.js modules
-        const Engine = Matter.Engine,
-              Render = Matter.Render,
-              Runner = Matter.Runner,
-              Bodies = Matter.Bodies,
-              Body = Matter.Body,
-              Composite = Matter.Composite,
-              Constraint = Matter.Constraint,
-              Vector = Matter.Vector;
+        const Engine = Matter.Engine, Render = Matter.Render, Runner = Matter.Runner,
+              Bodies = Matter.Bodies, Body = Matter.Body, Composite = Matter.Composite,
+              Constraint = Matter.Constraint, Vector = Matter.Vector, Events = Matter.Events;
 
-        // Game State
         let engine, render, runner;
-        let mode = 'build'; // 'build' or 'flight'
+        let mode = 'build';
         let keys = {};
         
-        // Rocket Data
-        let rocketParts = [
-            { type: 'pod', name: 'Command Pod', mass: 1, height: 40, width: 30, color: '#dddddd' }
-        ];
+        // Base Pod setup
+        const podPart = { type: 'pod', name: 'Cmd Pod', mass: 1, height: 40, width: 30, color: '#dddddd' };
+        let rocketParts = [podPart];
         
         let physicalBodies = [];
         let constraints = [];
         let activeEngineIndex = -1;
-        let totalFuel = 0;
-        let currentFuel = 0;
+        let totalFuel = 0; let currentFuel = 0;
         let parachuteDeployed = false;
-        
-        // Settings
-        const MAX_ALTITUDE = 20000; // where atmosphere ends visually
+        let clouds = [];
+        let currentStageIndex = 0;
+
+        const MAX_ALTITUDE = 15000;
         const CAMERA_BASE_ZOOM = 1;
 
-        // Initialize Build UI
-        updateStageList();
+        updateUI();
+
+        function addParachute() {
+            if (rocketParts[0].type === 'parachute') return; // Only one parachute
+            rocketParts.unshift({ type: 'parachute', name: 'Parachute', mass: 0.2, height: 15, width: 20, color: '#ff4444' });
+            updateUI();
+        }
 
         function addPart(type) {
             let part;
-            switch(type) {
-                case 'parachute':
-                    part = { type: 'parachute', name: 'Parachute', mass: 0.2, height: 10, width: 20, color: '#ff4444' };
-                    break;
-                case 'tank':
-                    part = { type: 'tank', name: 'Fuel Tank', mass: 2, fuel: 100, height: 60, width: 40, color: '#ff8800' };
-                    totalFuel += 100;
-                    break;
-                case 'decoupler':
-                    part = { type: 'decoupler', name: 'Decoupler', mass: 0.5, height: 10, width: 42, color: '#888888' };
-                    break;
-                case 'engine':
-                    part = { type: 'engine', name: 'Rocket Engine', mass: 1.5, thrust: 0.05, height: 30, width: 24, color: '#4444ff' };
-                    break;
+            if (type === 'tank') {
+                part = { type: 'tank', name: 'Fuel Tank', mass: 2, fuel: 100, height: 60, width: 40, color: '#ff8800' };
+                totalFuel += 100;
+            } else if (type === 'decoupler') {
+                part = { type: 'decoupler', name: 'Decoupler', mass: 0.5, height: 10, width: 42, color: '#888888' };
+            } else if (type === 'engine') {
+                part = { type: 'engine', name: 'Engine', mass: 1.5, thrust: 0.015, height: 35, width: 24, color: '#4444ff' }; // Reduced thrust
             }
             rocketParts.push(part);
-            updateStageList();
+            updateUI();
         }
 
-        function updateStageList() {
+        function resetBuild() {
+            rocketParts = [podPart];
+            totalFuel = 0;
+            updateUI();
+        }
+
+        function updateUI() {
+            // Blueprint Visualizer
+            const vis = document.getElementById('blueprint-visualizer');
+            vis.innerHTML = '';
+            rocketParts.forEach(part => {
+                let div = document.createElement('div');
+                div.className = 'bp-part';
+                div.style.height = (part.height) + 'px';
+                div.style.width = (part.width) + 'px';
+                div.style.backgroundColor = part.color;
+                div.innerText = part.name.substring(0,3);
+                vis.appendChild(div);
+            });
+
+            // Staging List (Show bottom up so user triggers bottom items first)
             const list = document.getElementById('stage-list');
             list.innerHTML = '';
-            // Display top to bottom
-            rocketParts.forEach((part, index) => {
-                const div = document.createElement('div');
-                div.className = `stage-item ${index === 0 ? 'stage-active' : ''}`;
-                div.id = `stage-ui-${index}`;
-                div.innerHTML = `<span>${index}. ${part.name}</span>`;
+            let stages = rocketParts.slice().reverse(); // Reverse for UI display (bottom is top of list)
+            stages.forEach((part, idx) => {
+                let realIndex = rocketParts.length - 1 - idx;
+                let div = document.createElement('div');
+                div.className = `stage-item`;
+                div.id = `stage-ui-${realIndex}`;
+                div.innerHTML = `<span>[Stage ${idx + 1}] ${part.name}</span>`;
                 list.appendChild(div);
             });
+            currentStageIndex = rocketParts.length - 1; // Start staging from the bottom
+            highlightCurrentStage();
+        }
+
+        function highlightCurrentStage() {
+            document.querySelectorAll('.stage-item').forEach(el => el.classList.remove('stage-active'));
+            if(document.getElementById(`stage-ui-${currentStageIndex}`)) {
+                document.getElementById(`stage-ui-${currentStageIndex}`).classList.add('stage-active');
+            }
+        }
+
+        function generateClouds() {
+            for(let i=0; i<60; i++) {
+                clouds.push({
+                    x: (Math.random() * window.innerWidth * 3) - window.innerWidth,
+                    y: -(Math.random() * MAX_ALTITUDE) + window.innerHeight,
+                    size: Math.random() * 80 + 30,
+                    opacity: Math.random() * 0.4 + 0.1
+                });
+            }
         }
 
         function launch() {
@@ -268,215 +203,218 @@
             document.getElementById('flight-ui').style.display = 'flex';
             document.getElementById('controls-help').style.display = 'block';
             currentFuel = totalFuel;
-
+            generateClouds();
             initPhysics();
         }
 
         function initPhysics() {
             engine = Engine.create();
-            engine.gravity.y = 1; // Standard gravity
+            engine.gravity.y = 1;
 
             render = Render.create({
                 element: document.body,
                 engine: engine,
-                options: {
-                    width: window.innerWidth,
-                    height: window.innerHeight,
-                    wireframes: false,
-                    background: 'transparent'
-                }
+                options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: 'transparent' }
             });
 
-            // Create Ground
+            // Ground
             const ground = Bodies.rectangle(window.innerWidth / 2, window.innerHeight - 20, window.innerWidth * 5, 40, { 
-                isStatic: true, 
-                render: { fillStyle: '#223322' } 
+                isStatic: true, render: { fillStyle: '#223322' } 
             });
             Composite.add(engine.world, ground);
 
-            // Build Rocket Physical Bodies (Bottom up visually on screen, based on array)
             let startY = window.innerHeight - 60;
             let currentY = startY;
 
-            // To build the physical stack, we iterate backwards so the first item (pod) ends up on top.
+            // Build physical stack bottom-up to rest on ground
             for (let i = rocketParts.length - 1; i >= 0; i--) {
                 const part = rocketParts[i];
                 let body = Bodies.rectangle(window.innerWidth / 2, currentY - (part.height / 2), part.width, part.height, {
-                    mass: part.mass,
-                    frictionAir: 0.01,
-                    render: { fillStyle: part.color }
+                    mass: part.mass, frictionAir: 0.01, render: { fillStyle: part.color }
                 });
-                
-                body.partIndex = i;
-                body.partData = part;
-                physicalBodies.push(body);
+                body.partData = part; body.partIndex = i;
+                physicalBodies[i] = body; // Map directly to array index
                 Composite.add(engine.world, body);
-
                 currentY -= part.height;
             }
 
-            // Reverse physicalBodies so index 0 is the pod, matching rocketParts array
-            physicalBodies.reverse();
+            // Dual Constraints for rigid connections (Prevents flopping)
+            for (let i = 0; i < rocketParts.length - 1; i++) {
+                let topBody = physicalBodies[i];
+                let bottomBody = physicalBodies[i+1];
+                let connectionWidth = Math.min(topBody.bounds.max.x - topBody.bounds.min.x, bottomBody.bounds.max.x - bottomBody.bounds.min.x) / 2 - 2;
 
-            // Connect bodies with constraints
-            for (let i = 0; i < physicalBodies.length - 1; i++) {
-                let bodyA = physicalBodies[i]; // Top body
-                let bodyB = physicalBodies[i+1]; // Bottom body
-                
-                let constraint = Constraint.create({
-                    bodyA: bodyA,
-                    pointA: { x: 0, y: bodyA.bounds.max.y - bodyA.position.y },
-                    bodyB: bodyB,
-                    pointB: { x: 0, y: bodyB.bounds.min.y - bodyB.position.y },
-                    stiffness: 1,
-                    render: { visible: false }
+                // Left Joint
+                let cLeft = Constraint.create({
+                    bodyA: topBody, bodyB: bottomBody,
+                    pointA: { x: -connectionWidth, y: topBody.bounds.max.y - topBody.position.y },
+                    pointB: { x: -connectionWidth, y: bottomBody.bounds.min.y - bottomBody.position.y },
+                    stiffness: 1, render: { visible: false }
+                });
+                // Right Joint
+                let cRight = Constraint.create({
+                    bodyA: topBody, bodyB: bottomBody,
+                    pointA: { x: connectionWidth, y: topBody.bounds.max.y - topBody.position.y },
+                    pointB: { x: connectionWidth, y: bottomBody.bounds.min.y - bottomBody.position.y },
+                    stiffness: 1, render: { visible: false }
                 });
                 
-                constraint.stageIndex = i + 1; // The part being attached below
-                constraints.push(constraint);
-                Composite.add(engine.world, constraint);
+                // Store joint link data so we know which to break during staging
+                cLeft.jointIndex = i; cRight.jointIndex = i;
+                constraints.push(cLeft, cRight);
+                Composite.add(engine.world, [cLeft, cRight]);
             }
 
-            // Find lowest engine to start
             updateActiveEngine();
-
             Render.run(render);
             runner = Runner.create();
             Runner.run(runner, engine);
 
-            // Game Loop for Telemetry and Camera
-            Matter.Events.on(engine, 'beforeUpdate', gameLoop);
+            Events.on(engine, 'beforeUpdate', gameLoop);
+            Events.on(render, 'afterRender', drawEffects);
         }
 
         function updateActiveEngine() {
             activeEngineIndex = -1;
-            // Find the lowest engine that is still attached to the pod
-            // We check this by tracing constraints. For simplicity, we just find the highest index engine still in world.
+            // Find lowest active engine still attached
             for (let i = physicalBodies.length - 1; i >= 0; i--) {
                 if (physicalBodies[i] && physicalBodies[i].partData.type === 'engine') {
-                    activeEngineIndex = i;
-                    break;
+                    activeEngineIndex = i; break;
                 }
             }
         }
 
-        // --- Controls & Input ---
         window.addEventListener('keydown', (e) => {
             keys[e.code] = true;
-            if (e.code === 'Space' && mode === 'flight') {
-                stageRocket();
-            }
+            if (e.code === 'Space' && mode === 'flight') stageRocket();
         });
-
-        window.addEventListener('keyup', (e) => {
-            keys[e.code] = false;
-        });
-
-        // "Top to bottom" staging sequence (0 is pod, we detach from bottom usually, 
-        // but user asked for simple top-to-bottom UI sequence. We will detach the lowest decoupler or fire parachute).
-        let currentStageStep = rocketParts.length - 1; 
+        window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
         function stageRocket() {
-            if (currentStageStep <= 0) return; // Only pod left
+            if (currentStageIndex < 0) return;
 
-            let partToStage = physicalBodies[currentStageStep];
-            if (!partToStage) {
-                currentStageStep--;
-                return;
-            }
+            let partBody = physicalBodies[currentStageIndex];
+            if (!partBody) { currentStageIndex--; return; }
 
-            // Update UI list
-            document.getElementById(`stage-ui-${currentStageStep}`).classList.remove('stage-active');
-            document.getElementById(`stage-ui-${currentStageStep}`).style.opacity = '0.3';
-            document.getElementById(`stage-ui-${currentStageStep - 1}`).classList.add('stage-active');
+            // Update UI list visually
+            let uiEl = document.getElementById(`stage-ui-${currentStageIndex}`);
+            if(uiEl) uiEl.style.opacity = '0.3';
 
-            if (partToStage.partData.type === 'parachute') {
+            if (partBody.partData.type === 'parachute') {
                 parachuteDeployed = true;
-                // Increase drag massively on the pod
-                Body.set(physicalBodies[0], 'frictionAir', 0.15);
-                partToStage.render.fillStyle = '#ffffff'; // Visual cue
+                // Add massive drag to the top piece
+                Body.set(partBody, 'frictionAir', 0.15);
+                partBody.render.fillStyle = '#ffffff'; 
             } 
-            else if (partToStage.partData.type === 'decoupler') {
-                // Find constraint connecting to the body ABOVE it and break it
-                let cIndex = constraints.findIndex(c => c.stageIndex === currentStageStep);
-                if (cIndex !== -1) {
-                    Composite.remove(engine.world, constraints[cIndex]);
-                    
-                    // Apply slight separation force
-                    Body.applyForce(physicalBodies[currentStageStep], physicalBodies[currentStageStep].position, {x: 0, y: 0.05});
-                    Body.applyForce(physicalBodies[currentStageStep-1], physicalBodies[currentStageStep-1].position, {x: 0, y: -0.05});
-                }
+            else if (partBody.partData.type === 'decoupler') {
+                // Break constraints connecting this decoupler to the part ABOVE it (jointIndex = currentStageIndex - 1)
+                let jointToBreak = currentStageIndex - 1;
+                let constraintsToRemove = constraints.filter(c => c.jointIndex === jointToBreak);
+                
+                constraintsToRemove.forEach(c => Composite.remove(engine.world, c));
+                
+                // Pop the decoupled pieces apart slightly
+                if(physicalBodies[currentStageIndex]) Body.applyForce(physicalBodies[currentStageIndex], physicalBodies[currentStageIndex].position, {x: 0, y: 0.02});
+                if(physicalBodies[currentStageIndex-1]) Body.applyForce(physicalBodies[currentStageIndex-1], physicalBodies[currentStageIndex-1].position, {x: 0, y: -0.02});
             }
 
-            // Remove detached parts from tracking so thrust doesn't apply to dropped engines
-            physicalBodies[currentStageStep] = null;
+            // Stop applying thrust to engines that have been dropped
+            if (partBody.partData.type === 'decoupler' || partBody.partData.type === 'tank') {
+                 // Disconnect tracking from this index downwards
+                 for(let i = currentStageIndex; i < physicalBodies.length; i++) {
+                     physicalBodies[i] = null; 
+                 }
+            }
+            
+            currentStageIndex--;
             updateActiveEngine();
-            currentStageStep--;
+            highlightCurrentStage();
         }
 
+        function drawEffects() {
+            if (mode !== 'flight') return;
+            const ctx = render.context;
+            
+            // Draw Clouds
+            ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            clouds.forEach(c => {
+                ctx.globalAlpha = c.opacity;
+                ctx.beginPath();
+                ctx.arc(c.x, c.y, c.size, 0, Math.PI*2);
+                ctx.arc(c.x+c.size*0.5, c.y-c.size*0.2, c.size*0.8, 0, Math.PI*2);
+                ctx.arc(c.x-c.size*0.4, c.y-c.size*0.1, c.size*0.6, 0, Math.PI*2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1.0;
+
+            // Draw Engine Exhaust
+            if ((keys['KeyW'] || keys['ArrowUp']) && currentFuel > 0 && activeEngineIndex !== -1) {
+                let engineBody = physicalBodies[activeEngineIndex];
+                if(engineBody) {
+                    let angle = engineBody.angle;
+                    // Calculate exhaust position at bottom of engine
+                    let exX = engineBody.position.x - Math.sin(angle) * (engineBody.partData.height/2);
+                    let exY = engineBody.position.y + Math.cos(angle) * (engineBody.partData.height/2);
+                    
+                    ctx.fillStyle = Math.random() > 0.5 ? '#ffaa00' : '#ff4400';
+                    ctx.beginPath();
+                    ctx.arc(exX, exY, 8 + Math.random()*5, 0, 2*Math.PI);
+                    ctx.fill();
+                }
+            }
+        }
 
         function gameLoop() {
             if (mode !== 'flight') return;
 
-            let pod = physicalBodies[0];
-            if (!pod) return;
+            // Base camera tracking off the Pod (index 0 or 1 if parachute is present)
+            let trackBody = physicalBodies[0] || physicalBodies[1]; 
+            if (!trackBody) return;
 
-            // 1. Apply Forces (Thrust & Steering)
             if ((keys['KeyW'] || keys['ArrowUp']) && currentFuel > 0 && activeEngineIndex !== -1) {
-                let activeEngineBody = physicalBodies[activeEngineIndex];
-                if (activeEngineBody) {
-                    // Calculate thrust vector based on pod rotation
-                    let angle = pod.angle;
-                    let thrustMagnitude = activeEngineBody.partData.thrust;
-                    let force = {
-                        x: thrustMagnitude * Math.sin(angle),
-                        y: -thrustMagnitude * Math.cos(angle)
-                    };
-                    
-                    // Apply to engine position
-                    Body.applyForce(activeEngineBody, activeEngineBody.position, force);
-                    currentFuel -= 0.2; // Consume fuel
+                let engineBody = physicalBodies[activeEngineIndex];
+                if (engineBody) {
+                    let force = { x: engineBody.partData.thrust * Math.sin(engineBody.angle), y: -engineBody.partData.thrust * Math.cos(engineBody.angle) };
+                    Body.applyForce(engineBody, engineBody.position, force);
+                    currentFuel -= 0.2;
                 }
             }
 
-            if (keys['KeyA'] || keys['ArrowLeft']) {
-                Body.setAngularVelocity(pod, pod.angularVelocity - 0.005);
-            }
-            if (keys['KeyD'] || keys['ArrowRight']) {
-                Body.setAngularVelocity(pod, pod.angularVelocity + 0.005);
+            // Steer the command pod
+            let steerBody = physicalBodies.find(b => b && b.partData.type === 'pod');
+            if (steerBody) {
+                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity - 0.003);
+                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(steerBody, steerBody.angularVelocity + 0.003);
             }
 
-            // 2. Telemetry Calculations
+            // Telemetry Update
             let startY = window.innerHeight - 60;
-            let currentAlt = Math.max(0, startY - pod.position.y); // pixels to meters approx
-            let speed = Vector.magnitude(pod.velocity) * 10; // multiplier for better UI numbers
+            let currentAlt = Math.max(0, startY - trackBody.position.y);
+            let speed = Vector.magnitude(trackBody.velocity) * 10;
             
-            // 3. Update HUD
             document.getElementById('tel-alt').innerText = Math.floor(currentAlt) + ' m';
             document.getElementById('tel-spd').innerText = Math.floor(speed) + ' m/s';
-            let fuelPercent = totalFuel > 0 ? Math.max(0, Math.floor((currentFuel / totalFuel) * 100)) : 0;
-            document.getElementById('tel-fuel').innerText = fuelPercent + '%';
+            document.getElementById('tel-fuel').innerText = (totalFuel > 0 ? Math.max(0, Math.floor((currentFuel / totalFuel) * 100)) : 0) + '%';
 
-            // Atmosphere calculation
             let atmoPercent = Math.max(0, 100 - (currentAlt / MAX_ALTITUDE) * 100);
             document.getElementById('atmo-meter').style.width = atmoPercent + '%';
 
-            // Reduce gravity as we leave atmosphere (Fake orbital mechanics)
-            let gravityScale = Math.max(0.1, atmoPercent / 100);
-            engine.gravity.scale = 0.001 * gravityScale;
+            // Sky color transition
+            let skyR = Math.floor((atmoPercent / 100) * 77);
+            let skyG = Math.floor((atmoPercent / 100) * 168);
+            let skyB = Math.floor((atmoPercent / 100) * 218);
+            document.body.style.backgroundColor = `rgb(${skyR}, ${skyG}, ${skyB})`;
 
-            // 4. Camera Tracking & Zoom
-            // Dynamic zoom based on speed and altitude
-            let targetZoom = CAMERA_BASE_ZOOM + (speed * 0.01) + (currentAlt * 0.0001);
-            targetZoom = Math.min(targetZoom, 3); // Max zoom out limit
-            
-            // Background color change (Sky to Space)
-            let skyColor = Math.floor(Math.max(10, 150 - (currentAlt * 0.01)));
-            document.body.style.backgroundColor = `rgb(10, 10, ${skyColor})`;
+            // Reduced gravity at high altitude
+            engine.gravity.scale = 0.001 * Math.max(0.1, atmoPercent / 100);
+
+            // Dynamic Camera Zoom
+            let targetZoom = CAMERA_BASE_ZOOM + (speed * 0.015) + (currentAlt * 0.0001);
+            targetZoom = Math.min(targetZoom, 2.5); // Max zoom
 
             Render.lookAt(render, {
-                min: { x: pod.position.x - (window.innerWidth/2) * targetZoom, y: pod.position.y - (window.innerHeight/2) * targetZoom },
-                max: { x: pod.position.x + (window.innerWidth/2) * targetZoom, y: pod.position.y + (window.innerHeight/2) * targetZoom }
+                min: { x: trackBody.position.x - (window.innerWidth/2) * targetZoom, y: trackBody.position.y - (window.innerHeight/2) * targetZoom },
+                max: { x: trackBody.position.x + (window.innerWidth/2) * targetZoom, y: trackBody.position.y + (window.innerHeight/2) * targetZoom }
             });
         }
     </script>
