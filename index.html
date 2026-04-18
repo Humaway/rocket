@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Rocket Simulator - Compound Rigid Body</title>
+    <title>Orbital Rocket Simulator - Dual Engines</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #050814; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; }
@@ -29,7 +29,7 @@
         .stage-active { border-left: 3px solid #28a745; background: #1e293b; }
 
         .telemetry-row { display: flex; justify-content: space-between; border-bottom: 1px solid #334; padding-bottom: 5px; font-family: monospace; font-size: 1.1rem; }
-        .telemetry-label { color: #8892b0; }
+        .telemetry-label { color: #8892b0; font-size: 0.9rem;}
 
         #controls-help { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 20px; font-size: 0.9rem; display: none; color: #ccc; z-index: 10; border: 1px solid #4da8da; }
         .bp-part { border: 1px solid rgba(255,255,255,0.2); width: 100%; text-align: center; font-size: 0.6rem; display: flex; align-items: center; justify-content: center; }
@@ -41,13 +41,14 @@
 <body>
 
     <div id="build-ui" class="panel">
-        <h2>VAB (Vehicle Assembly)</h2>
+        <h2>VAB (Assembly)</h2>
         <div class="build-container">
             <div class="controls-col">
-                <button class="btn" onclick="addParachute()">+ Parachute (Top)</button>
+                <button class="btn" onclick="addPart('parachute')">+ Parachute</button>
                 <button class="btn" onclick="addPart('tank')">+ Fuel Tank</button>
                 <button class="btn" onclick="addPart('decoupler')">+ Decoupler</button>
-                <button class="btn" onclick="addPart('engine')">+ Rocket Engine</button>
+                <button class="btn" style="border-color: #4444ff;" onclick="addPart('vacuum')">+ Vacuum Engine</button>
+                <button class="btn" style="border-color: #ff2222;" onclick="addPart('booster')">+ Booster Engine</button>
                 <button class="btn" onclick="resetBuild()" style="background: #4a1515; border-color: #ff4444; margin-top:5px;">Clear Rocket</button>
             </div>
             <div class="visualizer-col" id="blueprint-visualizer"></div>
@@ -62,7 +63,8 @@
         <button class="btn btn-map" id="map-toggle" style="width: 100%; margin-bottom: 15px;" onclick="toggleMap()">[M] MAP VIEW: OFF</button>
         <div class="telemetry-row"><span class="telemetry-label">ALTITUDE</span><span id="tel-alt">0 km</span></div>
         <div class="telemetry-row"><span class="telemetry-label">SPEED</span><span id="tel-spd">0 m/s</span></div>
-        <div class="telemetry-row"><span class="telemetry-label">FUEL</span><span id="tel-fuel">100%</span></div>
+        <div class="telemetry-row"><span class="telemetry-label">ATMO DENSITY</span><span id="tel-atmo">100%</span></div>
+        <div class="telemetry-row" style="margin-top: 10px;"><span class="telemetry-label">FUEL</span><span id="tel-fuel">100%</span></div>
         <div id="clamp-warning">SYSTEMS READY<br><span style="font-size:0.75rem; color:#aaa;">Press [W] or [SPACE] to Ignite</span></div>
     </div>
 
@@ -77,25 +79,23 @@
         let mode = 'build';
         let keys = {};
         
-        // Tuned parts
         const podPart = { type: 'pod', name: 'Cmd Pod', mass: 0.5, height: 40, width: 30, color: '#dddddd' };
         let rocketParts = [podPart];
         
-        let activeShip; // Single Compound Body
-        let debrisBodies = []; // Array of dropped stages
+        let activeShip; 
+        let debrisBodies = []; 
         
         let activeEngineLocalIndex = -1;
         let totalFuel = 0; let currentFuel = 0;
         let currentStageIndex = 0;
         let isLaunched = false;
         
-        // SCALED UP PLANET & GRAVITY MATH
+        // Massive scale planet for true orbital mechanics
         let planetBody;
-        const PLANET_RADIUS = 24000; // 4x Larger Planet
+        const PLANET_RADIUS = 24000; 
         const PLANET_POS = { x: 0, y: 0 }; 
-        const SURFACE_GRAVITY = 0.003; // Tuned 1g feel
-        const GRAVITY_CONSTANT = SURFACE_GRAVITY * Math.pow(PLANET_RADIUS, 2); 
-        const ATMOSPHERE_HEIGHT = 12000;
+        const GRAVITY_CONSTANT = 3000000; // Calibrated for Earth-like initial pull
+        const ATMOSPHERE_HEIGHT = 12000;  // Absolute hard cutoff for vacuum
         
         let isMapView = false;
         let trajectory = [];
@@ -103,20 +103,22 @@
 
         updateUI();
 
-        function addParachute() {
-            if (rocketParts[0].type === 'parachute') return;
-            rocketParts.unshift({ type: 'parachute', name: 'Parachute', mass: 0.1, height: 15, width: 20, color: '#ff4444' });
-            updateUI();
-        }
-
         function addPart(type) {
             let part;
-            if (type === 'tank') {
-                part = { type: 'tank', name: 'Fuel Tank', mass: 0.8, fuel: 1000, height: 60, width: 40, color: '#ff8800' };
+            if (type === 'parachute') {
+                if (rocketParts[0].type === 'parachute') return;
+                rocketParts.unshift({ type: 'parachute', name: 'Parachute', mass: 0.1, height: 15, width: 20, color: '#ff4444' });
+                updateUI(); return;
+            } else if (type === 'tank') {
+                part = { type: 'tank', name: 'Fuel Tank', mass: 0.8, fuel: 1500, height: 60, width: 40, color: '#ff8800' };
             } else if (type === 'decoupler') {
                 part = { type: 'decoupler', name: 'Decoupler', mass: 0.1, height: 8, width: 42, color: '#888888' };
-            } else if (type === 'engine') {
-                part = { type: 'engine', name: 'Engine', mass: 0.5, thrust: 0.012, height: 35, width: 24, color: '#4444ff' }; 
+            } else if (type === 'booster') {
+                // Heavy, powerful, thirsty
+                part = { type: 'engine', name: 'Booster', mass: 1.2, thrust: 0.04, fuelDrain: 2.0, height: 45, width: 28, color: '#ff2222' }; 
+            } else if (type === 'vacuum') {
+                // Light, weak, hyper-efficient
+                part = { type: 'engine', name: 'Vac Engine', mass: 0.4, thrust: 0.008, fuelDrain: 0.2, height: 25, width: 20, color: '#4444ff' }; 
             }
             rocketParts.push(part);
             updateUI();
@@ -155,7 +157,6 @@
             if(document.getElementById(`stage-ui-${currentStageIndex}`)) document.getElementById(`stage-ui-${currentStageIndex}`).classList.add('stage-active');
         }
 
-        // --- CORE COMPOUND BODY GENERATOR ---
         function createShipCompound(partsData) {
             let bodies = [];
             let currentY = 0;
@@ -163,23 +164,12 @@
 
             for (let i = 0; i < partsData.length; i++) {
                 let p = partsData[i];
-                let b = Bodies.rectangle(0, currentY + p.height / 2, p.width, p.height, {
-                    render: { fillStyle: p.color }
-                });
-                b.partData = p;
-                bodies.push(b);
-                currentY += p.height;
-                totalMass += p.mass;
+                let b = Bodies.rectangle(0, currentY + p.height / 2, p.width, p.height, { render: { fillStyle: p.color }});
+                b.partData = p; bodies.push(b); currentY += p.height; totalMass += p.mass;
             }
 
-            // Fuses the array into a single unbreakable body
-            let compound = Body.create({
-                parts: bodies,
-                mass: totalMass,
-                frictionAir: 0.02
-            });
-            
-            compound.partsData = partsData; // Store the blueprint array on the body
+            let compound = Body.create({ parts: bodies, mass: totalMass, frictionAir: 0.00 }); // Base friction MUST be 0
+            compound.partsData = partsData; 
             return compound;
         }
 
@@ -203,8 +193,7 @@
             });
 
             planetBody = Bodies.circle(PLANET_POS.x, PLANET_POS.y, PLANET_RADIUS, { 
-                isStatic: true, friction: 1, 
-                render: { fillStyle: '#1a3627', strokeStyle: '#2a5c41', lineWidth: 5 } 
+                isStatic: true, friction: 1, render: { fillStyle: '#1a3627', strokeStyle: '#2a5c41', lineWidth: 5 } 
             });
             
             let launchpad = Bodies.rectangle(0, -PLANET_RADIUS - 10, 300, 20, {
@@ -213,18 +202,12 @@
             
             Composite.add(engine.world, [planetBody, launchpad]);
 
-            // Create the Master Ship
             activeShip = createShipCompound(rocketParts);
-            
-            // Calculate where it should sit on the pad based on its true bounding box
             let startY = -PLANET_RADIUS - 20 - (activeShip.bounds.max.y - activeShip.bounds.min.y)/2;
             Body.setPosition(activeShip, {x: 0, y: startY});
-            
-            // Pre-launch Stasis (Replaces Clamps)
-            Body.setStatic(activeShip, true);
+            Body.setStatic(activeShip, true); // Stasis
 
             Composite.add(engine.world, activeShip);
-
             updateActiveEngine();
             Render.run(render);
             runner = Runner.create();
@@ -236,12 +219,8 @@
 
         function updateActiveEngine() {
             activeEngineLocalIndex = -1;
-            // Scan the active ship blueprint for the lowest engine
             for (let i = activeShip.partsData.length - 1; i >= 0; i--) {
-                if (activeShip.partsData[i].type === 'engine') { 
-                    activeEngineLocalIndex = i; 
-                    break; 
-                }
+                if (activeShip.partsData[i].type === 'engine') { activeEngineLocalIndex = i; break; }
             }
         }
 
@@ -262,7 +241,7 @@
         function initiateLaunchSequence() {
             if (!isLaunched) {
                 isLaunched = true;
-                Body.setStatic(activeShip, false); // Release the ship to physics
+                Body.setStatic(activeShip, false); 
                 document.getElementById('clamp-warning').style.display = 'none';
             }
         }
@@ -277,68 +256,53 @@
             if(uiEl) uiEl.style.opacity = '0.3';
 
             if (stagePartData.type === 'parachute') {
-                Body.set(activeShip, 'frictionAir', 0.8); // Huge drag
-                // Visual update for parachute (parts[1] is the highest sub-body)
+                Body.set(activeShip, 'frictionAir', 0.8); 
                 activeShip.parts[1].render.fillStyle = '#ffffff'; 
                 
             } else if (stagePartData.type === 'decoupler') {
-                // --- THE SEAMLESS SPLIT ---
                 let splitIdx = currentStageIndex;
                 let topData = activeShip.partsData.slice(0, splitIdx);
                 let bottomData = activeShip.partsData.slice(splitIdx);
                 
-                // Record exact current state
                 let oldAngle = activeShip.angle;
                 let oldVel = activeShip.velocity;
                 let oldAngVel = activeShip.angularVelocity;
                 
-                // Record the exact world coordinate of the pod to anchor the new ship
                 let oldPodWorldPos = { x: activeShip.parts[1].position.x, y: activeShip.parts[1].position.y };
-                // Record world coordinate of the top of the debris
                 let oldDebrisWorldPos = { x: activeShip.parts[splitIdx + 1].position.x, y: activeShip.parts[splitIdx + 1].position.y };
                 
-                // Delete old unbreakable ship
                 Composite.remove(engine.world, activeShip);
                 
-                // Create New Top Ship
                 activeShip = createShipCompound(topData);
-                // Calculate local offset from the new centroid to the new pod
                 let newPodLocalOffset = Vector.sub(activeShip.parts[1].position, activeShip.position);
                 let rotatedPodOffset = Vector.rotate(newPodLocalOffset, oldAngle);
-                // Position the new centroid so the pod lands exactly where the old pod was
                 Body.setPosition(activeShip, Vector.sub(oldPodWorldPos, rotatedPodOffset));
-                Body.setAngle(activeShip, oldAngle);
-                Body.setVelocity(activeShip, oldVel);
-                Body.setAngularVelocity(activeShip, oldAngVel);
+                Body.setAngle(activeShip, oldAngle); Body.setVelocity(activeShip, oldVel); Body.setAngularVelocity(activeShip, oldAngVel);
                 Composite.add(engine.world, activeShip);
                 
-                // Create New Debris Ship
                 let debris = createShipCompound(bottomData);
                 let newDebrisLocalOffset = Vector.sub(debris.parts[1].position, debris.position);
                 let rotatedDebrisOffset = Vector.rotate(newDebrisLocalOffset, oldAngle);
                 Body.setPosition(debris, Vector.sub(oldDebrisWorldPos, rotatedDebrisOffset));
-                Body.setAngle(debris, oldAngle);
-                Body.setVelocity(debris, oldVel);
-                Body.setAngularVelocity(debris, oldAngVel);
+                Body.setAngle(debris, oldAngle); Body.setVelocity(debris, oldVel); Body.setAngularVelocity(debris, oldAngVel);
                 Composite.add(engine.world, debris);
                 debrisBodies.push(debris);
 
-                // Small separation pop
                 let sepForce = 0.005 * activeShip.mass;
                 Body.applyForce(activeShip, activeShip.position, {x: Math.sin(oldAngle)*sepForce, y: -Math.cos(oldAngle)*sepForce});
                 Body.applyForce(debris, debris.position, {x: -Math.sin(oldAngle)*sepForce, y: Math.cos(oldAngle)*sepForce});
             }
 
-            currentStageIndex--; 
-            updateActiveEngine(); 
-            highlightCurrentStage();
+            currentStageIndex--; updateActiveEngine(); highlightCurrentStage();
         }
 
         function gameLoop() {
             if (mode !== 'flight') return;
             if (!activeShip) return;
 
-            // 1. Radial Orbital Gravity
+            let atmoPercentDisplay = 100;
+
+            // 1. Radial Gravity & Strict Vacuum Atmosphere
             let allBodies = [activeShip, ...debrisBodies];
             allBodies.forEach(body => {
                 if(!body) return;
@@ -352,31 +316,32 @@
                     Body.applyForce(body, body.position, force);
                 }
 
-                // Atmosphere
                 let altitude = dist - PLANET_RADIUS;
                 let atmoDensity = Math.max(0, 1 - (altitude / ATMOSPHERE_HEIGHT));
+                
+                if (body === activeShip) atmoPercentDisplay = Math.floor(atmoDensity * 100);
+
+                // If density is 0, friction is 0, momentum is preserved perfectly forever.
                 if(body.partsData && body.partsData[0].type !== 'parachute') {
                     Body.set(body, 'frictionAir', 0.01 * atmoDensity);
                 }
             });
 
-            // 2. Thrust Control
+            // 2. Dual Engine Thrust Control
             if ((keys['KeyW'] || keys['ArrowUp']) && currentFuel > 0 && activeEngineLocalIndex !== -1) {
                 initiateLaunchSequence();
-                // Apply thrust relative to the master ship's angle
-                let thrustAmount = activeShip.partsData[activeEngineLocalIndex].thrust;
-                let force = { 
-                    x: thrustAmount * Math.sin(activeShip.angle), 
-                    y: -thrustAmount * Math.cos(activeShip.angle) 
-                };
+                let engineData = activeShip.partsData[activeEngineLocalIndex];
+                let force = { x: engineData.thrust * Math.sin(activeShip.angle), y: -engineData.thrust * Math.cos(activeShip.angle) };
                 Body.applyForce(activeShip, activeShip.position, force);
-                currentFuel -= 0.5; 
+                
+                // Drain fuel based on engine type
+                currentFuel -= (engineData.fuelDrain || 1.0); 
             }
 
             // 3. Steering Control
             if (isLaunched) {
-                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity - 0.0008);
-                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0008);
+                if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity - 0.0006);
+                if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeShip, activeShip.angularVelocity + 0.0006);
             }
 
             // 4. Telemetry
@@ -386,13 +351,14 @@
 
             document.getElementById('tel-alt').innerText = (altitudeRaw / 100).toFixed(2) + ' km';
             document.getElementById('tel-spd').innerText = Math.floor(speedRaw) + ' m/s';
+            document.getElementById('tel-atmo').innerText = atmoPercentDisplay + '%';
             document.getElementById('tel-fuel').innerText = (totalFuel > 0 ? Math.max(0, Math.floor((currentFuel / totalFuel) * 100)) : 0) + '%';
 
-            // 5. Track Trajectory
+            // 5. Track Trajectory (Stores a huge 3000 point array so the loop connects)
             tickCounter++;
-            if(tickCounter % 10 === 0 && isLaunched) {
+            if(tickCounter % 20 === 0 && isLaunched) {
                 trajectory.push({x: activeShip.position.x, y: activeShip.position.y});
-                if(trajectory.length > 800) trajectory.shift(); 
+                if(trajectory.length > 3000) trajectory.shift(); 
             }
 
             // 6. Camera System
@@ -416,19 +382,23 @@
             if (mode !== 'flight') return;
             const ctx = render.context;
             
+            // Dynamic Line Thickness based on zoom scale
+            let currentScale = render.bounds.max.x - render.bounds.min.x;
+            let baseScale = window.innerWidth;
+            let dynamicLineWidth = Math.max(2, (currentScale / baseScale) * 3);
+
             // Draw Trajectory Trail
             if (trajectory.length > 1) {
                 ctx.beginPath();
                 ctx.moveTo(trajectory[0].x, trajectory[0].y);
                 for(let i = 1; i < trajectory.length; i++) { ctx.lineTo(trajectory[i].x, trajectory[i].y); }
                 ctx.strokeStyle = 'rgba(255, 50, 50, 0.6)';
-                ctx.lineWidth = isMapView ? 80 : 5; // Scaled up for huge map
+                ctx.lineWidth = dynamicLineWidth; 
                 ctx.stroke();
             }
 
-            // Draw Exhaust (Locate the active engine sub-body inside the compound)
+            // Draw Exhaust
             if ((keys['KeyW'] || keys['ArrowUp']) && currentFuel > 0 && activeEngineLocalIndex !== -1 && !isMapView) {
-                // index + 1 because parts[0] is the bounding hull in Matter.js
                 let engineSubBody = activeShip.parts[activeEngineLocalIndex + 1];
                 if(engineSubBody) {
                     let engineData = activeShip.partsData[activeEngineLocalIndex];
@@ -436,7 +406,9 @@
                     let exY = engineSubBody.position.y + Math.cos(activeShip.angle) * (engineData.height/2 + 5);
                     ctx.fillStyle = Math.random() > 0.5 ? '#ffaa00' : '#ff4400';
                     ctx.beginPath();
-                    ctx.arc(exX, exY, 8 + Math.random()*5, 0, 2*Math.PI);
+                    // Bigger exhaust for booster
+                    let exhaustSize = engineData.name === 'Booster' ? (12 + Math.random()*8) : (6 + Math.random()*4);
+                    ctx.arc(exX, exY, exhaustSize, 0, 2*Math.PI);
                     ctx.fill();
                 }
             }
