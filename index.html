@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V5.9 - True Patched Conics & Flight Computer</title>
+    <title>Orbital Simulator V6.0 - S.A.S. & Flight Computer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -62,11 +62,14 @@
         .btn-warp { background: #1e293b; color: white; border: 1px solid #445; padding: 5px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
         .btn-warp:hover { background: #00ffcc; color: black; }
 
-        #node-ui { top: 80px; left: 50%; transform: translateX(-50%); display: none; background: rgba(20, 30, 50, 0.95); padding: 15px; border-radius: 10px; border: 1px solid #eab308; flex-direction: column; gap: 10px; text-align: center; }
-        .node-btn { background: #3b82f6; color: white; border: none; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: bold;}
-        .node-btn:hover { background: #2563eb; }
-
-        #controls-help { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 20px; font-size: 0.9rem; color: #00ffcc; border: 1px solid #00ffcc; display: none; z-index: 10; }
+        #node-ui { top: 80px; left: 50%; transform: translateX(-50%); display: none; background: rgba(20, 30, 50, 0.95); padding: 15px; border-radius: 10px; border: 1px solid #eab308; flex-direction: column; gap: 10px; text-align: center; width: 250px; }
+        
+        /* Custom Slider Styling */
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #00ffcc; cursor: pointer; margin-top: -6px; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; cursor: pointer; background: #334; border-radius: 2px; }
+        
+        #controls-help { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 20px; font-size: 0.9rem; color: #00ffcc; border: 1px solid #00ffcc; display: none; z-index: 10; text-align: center; line-height: 1.5; }
     </style>
 </head>
 <body>
@@ -107,12 +110,14 @@
 
     <div id="flight-ui" class="panel">
         <button class="btn-map" id="map-toggle" onclick="toggleMap()">[M] MAP VIEW: OFF</button>
+        <div class="telemetry-row"><span class="telemetry-label">S.O.I.</span><span id="tel-soi" style="color:#a855f7; font-weight:bold;">EARTH</span></div>
         <div class="telemetry-row"><span class="telemetry-label">ALTITUDE</span><span id="tel-alt">0 km</span></div>
-        <div class="telemetry-row"><span class="telemetry-label">SPEED</span><span id="tel-spd">0 m/s</span></div>
+        <div class="telemetry-row"><span class="telemetry-label">REL SPEED</span><span id="tel-spd">0 m/s</span></div>
         <div class="telemetry-row"><span class="telemetry-label">ATMO DENSITY</span><span id="tel-atmo">100%</span></div>
         <div class="telemetry-row"><span class="telemetry-label">STAGE FUEL</span><span id="tel-fuel">100%</span></div>
         
         <div id="nav-panel">
+            <div class="nav-row"><span>S.A.S. MODE:</span><span id="nav-sas" class="nav-highlight">OFF</span></div>
             <div class="nav-row"><span>CURRENT PITCH:</span><span id="nav-pitch" class="nav-highlight">0°</span></div>
             <div class="nav-row" id="nav-target-row" style="display:none;"><span>TARGET PITCH:</span><span id="nav-target" class="nav-target">0°</span></div>
             <div class="nav-row" id="nav-dist-row" style="display:none;"><span>DIST TO NODE:</span><span id="nav-dist" class="nav-target">0 km</span></div>
@@ -134,18 +139,17 @@
 
     <div id="node-ui" class="panel">
         <div style="color: #eab308; font-weight: bold; letter-spacing: 1px;">MANEUVER NODE</div>
-        <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
-            <button class="node-btn" onclick="adjNode(-50)">-50</button>
-            <button class="node-btn" onclick="adjNode(-5)">-5</button>
-            <span id="node-dv-readout" style="font-family: monospace; font-size: 1.2rem; width: 80px;">0 m/s</span>
-            <button class="node-btn" onclick="adjNode(5)">+5</button>
-            <button class="node-btn" onclick="adjNode(50)">+50</button>
-        </div>
-        <div style="font-size: 0.8rem; color: #8892b0;">PROGRADE Δv</div>
+        <span id="node-dv-readout" style="font-family: monospace; font-size: 1.4rem;">0.0 m/s</span>
+        <input type="range" id="node-slider" min="-100" max="100" step="0.5" value="0" oninput="updateNodeSlider(this.value)">
+        <div style="font-size: 0.8rem; color: #8892b0; margin-top: -5px;">PROGRADE Δv</div>
         <button onclick="clearNode()" style="margin-top: 5px; background: transparent; border: 1px solid #ef4444; color: #ef4444; border-radius: 4px; padding: 4px; cursor: pointer;">Delete Node</button>
     </div>
 
-    <div id="controls-help">[W] Throttle | [A/D] Steer | [SPACE] Stage | [G] Legs | [M] Map | Dbl-Click Map to Focus</div>
+    <div id="controls-help">
+        [W] Throttle | [A/D] Steer | [SPACE] Stage | [G] Legs <br>
+        [T] Prograde | [Y] Retrograde | [U] Maneuver | [O] SAS Off <br>
+        [M] Map View | Dbl-Click Map to Focus
+    </div>
 
     <script>
         // --- 1. PART DATABASE ---
@@ -268,6 +272,7 @@
         let engine, render, flightLoopId, dynamicSurface;
         
         let mode = 'build', keys = {}, isLaunched = false, isMapView = false;
+        let sasMode = 'off'; // off, prograde, retrograde, maneuver
         
         let cameraTarget = 'ship'; 
         let mapZoom = 1.0; let mapOffsetX = 0, mapOffsetY = 0; let isDraggingMap = false, lastMouse = {x: 0, y: 0}, dragDist = 0;
@@ -291,7 +296,7 @@
             document.getElementById('warp-ui').style.display = 'flex'; document.getElementById('controls-help').style.display = 'block';
             mode = 'flight'; isMapView = false; document.getElementById('map-toggle').innerText = "[M] MAP VIEW: OFF";
             maneuver.active = false; document.getElementById('node-ui').style.display = 'none';
-            cameraTarget = 'ship';
+            cameraTarget = 'ship'; sasMode = 'off'; document.getElementById('nav-sas').innerText = 'OFF';
             
             buildPhysicsWorld();
         }
@@ -309,7 +314,6 @@
             render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }});
             
             dynamicSurface = Bodies.rectangle(0, PLANET_RADIUS + 50, 10000, 100, { isStatic: true, friction: 0.8 });
-            
             MOON_POS = {x: Math.sin(moonAngle) * MOON_DIST, y: -Math.cos(moonAngle) * MOON_DIST};
             moonBody = Bodies.circle(MOON_POS.x, MOON_POS.y, MOON_RADIUS, { isStatic: true, friction: 1, render: { visible: false } });
             
@@ -358,6 +362,12 @@
             if (e.code === 'Space' && isLaunched && !spacePressed) { spacePressed = true; executeStaging(); }
             if (e.code === 'KeyM') toggleMap();
             if (e.code === 'KeyG') { let b = shipBodies[activeShipIndex]; if(b) b.blueprint.forEach(p => { if(p.type === 'leg') p.deployed = !p.deployed; }); }
+            
+            // S.A.S Controls
+            if (e.code === 'KeyT') { sasMode = 'prograde'; document.getElementById('nav-sas').innerText = 'PROGRADE'; }
+            if (e.code === 'KeyY') { sasMode = 'retrograde'; document.getElementById('nav-sas').innerText = 'RETROGRADE'; }
+            if (e.code === 'KeyU') { sasMode = 'maneuver'; document.getElementById('nav-sas').innerText = 'MANEUVER'; }
+            if (e.code === 'KeyO') { sasMode = 'off'; document.getElementById('nav-sas').innerText = 'OFF'; }
         });
         window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'Space') spacePressed = false; });
         
@@ -388,7 +398,7 @@
                     let d = Math.sqrt(Math.pow(px - mWorldX, 2) + Math.pow(py - mWorldY, 2)); if (d < minDist) { minDist = d; closest = pt; } 
                 });
                 
-                if (closest) { maneuver = { active: true, dv: 0, x: closest.x, y: closest.y, targetAngle: 0 }; document.getElementById('node-ui').style.display = 'flex'; updateNavBall(); }
+                if (closest) { maneuver = { active: true, dv: 0, x: closest.x, y: closest.y, targetAngle: 0 }; document.getElementById('node-slider').value = 0; document.getElementById('node-dv-readout').innerText = '0.0 m/s'; document.getElementById('node-ui').style.display = 'flex'; updateNavBall(); }
             }
             isDraggingMap = false; 
         });
@@ -407,8 +417,18 @@
             }
         });
 
-        function adjNode(amt) { maneuver.dv += amt; document.getElementById('node-dv-readout').innerText = maneuver.dv + ' m/s'; updateNavBall(); }
-        function clearNode() { maneuver.active = false; maneuver.dv = 0; document.getElementById('node-ui').style.display = 'none'; document.getElementById('node-dv-readout').innerText = '0 m/s'; updateNavBall(); }
+        // FIX: Live Range Slider for Delta-V
+        function updateNodeSlider(val) { 
+            maneuver.dv = parseFloat(val); 
+            document.getElementById('node-dv-readout').innerText = maneuver.dv.toFixed(1) + ' m/s'; 
+            updateNavBall(); 
+        }
+        
+        function clearNode() { 
+            maneuver.active = false; maneuver.dv = 0; document.getElementById('node-slider').value = 0; 
+            document.getElementById('node-ui').style.display = 'none'; document.getElementById('node-dv-readout').innerText = '0.0 m/s'; 
+            updateNavBall(); 
+        }
 
         function toggleMap() { 
             isMapView = !isMapView; document.getElementById('map-toggle').innerText = isMapView ? "[M] MAP VIEW: ON" : "[M] MAP VIEW: OFF"; 
@@ -517,7 +537,7 @@
                 document.getElementById('nav-dist').innerText = (dist / 100).toFixed(1) + ' km';
                 
                 // Live DV Updater
-                document.getElementById('nav-burn').innerText = Math.max(0, maneuver.dv).toFixed(1) + ' m/s';
+                document.getElementById('nav-burn').innerText = Math.abs(maneuver.dv).toFixed(1) + ' m/s';
             } else { 
                 document.getElementById('nav-target-row').style.display = 'none'; 
                 document.getElementById('nav-dist-row').style.display = 'none'; 
@@ -545,6 +565,31 @@
             moonAngle += moonSpeed; MOON_POS.x = Math.sin(moonAngle) * MOON_DIST; MOON_POS.y = -Math.cos(moonAngle) * MOON_DIST;
             Body.setPosition(moonBody, MOON_POS);
 
+            let distToMoon = Math.sqrt(Math.pow(MOON_POS.x - activeBody.position.x, 2) + Math.pow(MOON_POS.y - activeBody.position.y, 2));
+            
+            // FIX: S.A.S. Autopilot
+            if (sasMode !== 'off' && isLaunched) {
+                let targetA = 0;
+                let relVel = { x: activeBody.velocity.x, y: activeBody.velocity.y };
+                
+                if (distToMoon < MOON_SOI) {
+                    let mvx = Math.cos(moonAngle) * MOON_DIST * moonSpeed;
+                    let mvy = Math.sin(moonAngle) * MOON_DIST * moonSpeed;
+                    relVel.x -= mvx; relVel.y -= mvy;
+                }
+
+                if (sasMode === 'maneuver' && maneuver.active) { targetA = maneuver.targetAngle; } 
+                else if (sasMode === 'prograde') { targetA = Math.atan2(relVel.x, -relVel.y); } 
+                else if (sasMode === 'retrograde') { targetA = Math.atan2(-relVel.x, relVel.y); }
+
+                let currA = activeBody.angle;
+                let diff = targetA - currA;
+                while (diff <= -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2;
+                
+                let torque = diff * 0.0005 - activeBody.angularVelocity * 0.05;
+                Body.setAngularVelocity(activeBody, activeBody.angularVelocity + Math.max(-0.001, Math.min(0.001, torque)));
+            }
+
             let isThrusting = (keys['KeyW'] || keys['ArrowUp']);
             if (isThrusting && !isLaunched) { isLaunched = true; Body.setStatic(activeBody, false); }
 
@@ -553,23 +598,14 @@
                 let dxM = MOON_POS.x - body.position.x, dyM = MOON_POS.y - body.position.y; let d2M = dxM*dxM + dyM*dyM, dM = Math.sqrt(d2M);
 
                 if (isLaunched) {
-                    // FIX: True Patched Conics (1 Source of Gravity at a time)
                     if (dM < MOON_SOI && dM > MOON_RADIUS) { 
-                        // Inside SOI: Moon Gravity + Earth Gravity applied to the Moon's center (keeps trajectory relative to Moon stable)
                         let m_dx = PLANET_POS.x - MOON_POS.x, m_dy = PLANET_POS.y - MOON_POS.y;
                         let m_d2 = m_dx*m_dx + m_dy*m_dy, m_d = Math.sqrt(m_d2);
-                        
-                        let earthAccX = (m_dx/m_d)*(GRAVITY_CONSTANT / m_d2);
-                        let earthAccY = (m_dy/m_d)*(GRAVITY_CONSTANT / m_d2);
-                        let moonAccX = (dxM/dM)*(MOON_GRAVITY / d2M);
-                        let moonAccY = (dyM/dM)*(MOON_GRAVITY / d2M);
+                        let earthAccX = (m_dx/m_d)*(GRAVITY_CONSTANT / m_d2); let earthAccY = (m_dy/m_d)*(GRAVITY_CONSTANT / m_d2);
+                        let moonAccX = (dxM/dM)*(MOON_GRAVITY / d2M); let moonAccY = (dyM/dM)*(MOON_GRAVITY / d2M);
 
-                        Body.applyForce(body, body.position, {
-                            x: (earthAccX + moonAccX) * body.mass, 
-                            y: (earthAccY + moonAccY) * body.mass
-                        });
+                        Body.applyForce(body, body.position, { x: (earthAccX + moonAccX) * body.mass, y: (earthAccY + moonAccY) * body.mass });
                     } else if (d > PLANET_RADIUS) {
-                        // Standard Earth Gravity
                         Body.applyForce(body, body.position, {x: (dx/d)*(GRAVITY_CONSTANT / d2)*body.mass, y: (dy/d)*(GRAVITY_CONSTANT / d2)*body.mass}); 
                     }
                 }
@@ -604,11 +640,12 @@
                                 Body.applyForce(activeBody, subBody.position, { x: p.thrust * Math.sin(activeBody.angle), y: -p.thrust * Math.cos(activeBody.angle) }); 
                                 p.isBurning = true; 
                                 
-                                // FIX: Live Delta-V Burn Tracker Drain
-                                if (maneuver.active && maneuver.dv > 0) {
-                                    let actualDvTick = p.thrust / activeBody.mass;
-                                    maneuver.dv -= actualDvTick * 10;
-                                    if (maneuver.dv < 0.2) { clearNode(); }
+                                if (maneuver.active && maneuver.dv !== 0) {
+                                    let actualDvTick = (p.thrust / activeBody.mass) * 10;
+                                    if (maneuver.dv > 0) maneuver.dv -= actualDvTick;
+                                    else maneuver.dv += actualDvTick;
+                                    
+                                    if (Math.abs(maneuver.dv) < 0.5) clearNode();
                                 }
                             }
                         } else { p.isBurning = false; }
@@ -620,15 +657,29 @@
                 }
             } else { activeBody.blueprint.forEach(p => { if(p.type==='engine') p.isBurning = false; }); }
 
-            if (isLaunched) {
+            if (isLaunched && sasMode === 'off') {
                 if (keys['KeyA'] || keys['ArrowLeft']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity - 0.0003);
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity + 0.0003);
             }
 
             let dist = Vector.magnitude(activeBody.position); let alt = dist - PLANET_RADIUS;
             document.getElementById('tel-alt').innerText = (alt / 100).toFixed(1) + ' km';
-            document.getElementById('tel-spd').innerText = Math.floor(Vector.magnitude(activeBody.velocity) * 10) + ' m/s';
             document.getElementById('tel-atmo').innerText = alt < ATMOSPHERE_HEIGHT ? Math.floor((1 - alt/ATMOSPHERE_HEIGHT)*100) + '%' : '0% (VAC)';
+
+            // FIX: Relative Speed Telemetry Calculation
+            let relVel = { x: activeBody.velocity.x, y: activeBody.velocity.y };
+            if (distToMoon < MOON_SOI) {
+                document.getElementById('tel-soi').innerText = 'MOON';
+                document.getElementById('tel-soi').style.color = '#a855f7';
+                let mvx = Math.cos(moonAngle) * MOON_DIST * moonSpeed;
+                let mvy = Math.sin(moonAngle) * MOON_DIST * moonSpeed;
+                relVel.x -= mvx; relVel.y -= mvy;
+            } else {
+                document.getElementById('tel-soi').innerText = 'EARTH';
+                document.getElementById('tel-soi').style.color = '#00f2ff';
+            }
+            let displaySpeed = Math.sqrt(relVel.x*relVel.x + relVel.y*relVel.y) * 10;
+            document.getElementById('tel-spd').innerText = Math.floor(displaySpeed) + ' m/s';
 
             if(isMapView) {
                 let targetX = mapOffsetX, targetY = mapOffsetY;
@@ -666,6 +717,7 @@
             let inManeuver = false;
 
             for (let i = 0; i < steps; i++) { 
+                
                 if (maneuver.active && !inManeuver) {
                     let dToNodeSq = Math.pow(px - maneuver.x, 2) + Math.pow(py - maneuver.y, 2);
                     if (dToNodeSq < 2000000) { 
@@ -673,8 +725,9 @@
                         let vx = px - px_prev; let vy = py - py_prev;
                         let vMag = Math.sqrt(vx*vx + vy*vy);
                         
-                        // FIX: Corrected Navball Heading Math
+                        // FIX: Corrected Target Heading Math
                         maneuver.targetAngle = Math.atan2(vx, -vy); 
+                        if (maneuver.dv < 0) maneuver.targetAngle += Math.PI; // Flip 180 if retrograde burn
                         
                         let proX = vx/vMag; let proY = vy/vMag;
                         let mjsDv = maneuver.dv / 10; 
@@ -707,7 +760,6 @@
                 
                 let fx = 0, fy = 0;
                 
-                // FIX: True Patched Conics Predictor Math
                 if (rM < MOON_SOI) {
                     let m_dx = PLANET_POS.x - mx, m_dy = PLANET_POS.y - my;
                     let m_d2 = m_dx*m_dx + m_dy*m_dy, m_d = Math.sqrt(m_d2);
