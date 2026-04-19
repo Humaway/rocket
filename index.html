@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V5.8 - Patched Conics & Camera Tracking</title>
+    <title>Orbital Simulator V5.9 - True Patched Conics & Flight Computer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -56,6 +56,7 @@
         .nav-row { display: flex; justify-content: space-between; font-family: monospace; font-size: 0.9rem; margin-bottom: 5px; }
         .nav-highlight { color: #00ffcc; font-weight: bold; }
         .nav-target { color: #eab308; font-weight: bold; }
+        .nav-burn { color: #ef4444; font-weight: bold; }
 
         #warp-ui { top: 20px; left: 50%; transform: translateX(-50%); display: none; background: rgba(10, 15, 25, 0.9); padding: 10px 20px; border-radius: 20px; border: 1px solid #334; align-items: center; gap: 15px; }
         .btn-warp { background: #1e293b; color: white; border: 1px solid #445; padding: 5px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
@@ -115,6 +116,7 @@
             <div class="nav-row"><span>CURRENT PITCH:</span><span id="nav-pitch" class="nav-highlight">0°</span></div>
             <div class="nav-row" id="nav-target-row" style="display:none;"><span>TARGET PITCH:</span><span id="nav-target" class="nav-target">0°</span></div>
             <div class="nav-row" id="nav-dist-row" style="display:none;"><span>DIST TO NODE:</span><span id="nav-dist" class="nav-target">0 km</span></div>
+            <div class="nav-row" id="nav-burn-row" style="display:none;"><span>BURN Δv:</span><span id="nav-burn" class="nav-burn">0 m/s</span></div>
         </div>
 
         <div style="margin-top: 15px; border-top: 1px solid #334; padding-top: 10px;">
@@ -267,8 +269,7 @@
         
         let mode = 'build', keys = {}, isLaunched = false, isMapView = false;
         
-        // MAP CAMERA TRACKING STATE
-        let cameraTarget = 'ship'; // 'ship', 'moon', 'planet', 'manual'
+        let cameraTarget = 'ship'; 
         let mapZoom = 1.0; let mapOffsetX = 0, mapOffsetY = 0; let isDraggingMap = false, lastMouse = {x: 0, y: 0}, dragDist = 0;
         
         let warpLevels = [1, 2, 5, 10, 20]; let currentWarpIndex = 0;
@@ -382,7 +383,6 @@
                 let mWorldX = (e.clientX / scaleX) + bounds.min.x; let mWorldY = (e.clientY / scaleY) + bounds.min.y;
                 let paths = getPredictivePath(true); let closest = null; let minDist = 20 / scaleX; 
                 paths.base.forEach(pt => { 
-                    // Need to check absolute hit coords even if point was stored relative
                     let px = pt.inSOI ? MOON_POS.x + pt.relX : pt.x;
                     let py = pt.inSOI ? MOON_POS.y + pt.relY : pt.y;
                     let d = Math.sqrt(Math.pow(px - mWorldX, 2) + Math.pow(py - mWorldY, 2)); if (d < minDist) { minDist = d; closest = pt; } 
@@ -393,7 +393,6 @@
             isDraggingMap = false; 
         });
 
-        // FIX: Double click to focus camera
         window.addEventListener('dblclick', e => {
             if(isMapView && e.target.tagName === 'CANVAS') {
                 let bounds = render.bounds; let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x); let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
@@ -506,12 +505,24 @@
             document.getElementById('nav-pitch').innerText = Math.round(pitch) + '°';
 
             if (maneuver.active) {
-                document.getElementById('nav-target-row').style.display = 'flex'; document.getElementById('nav-dist-row').style.display = 'flex';
-                let tPitch = (maneuver.targetAngle * (180/Math.PI)) % 360; if (tPitch < 0) tPitch += 360;
+                document.getElementById('nav-target-row').style.display = 'flex'; 
+                document.getElementById('nav-dist-row').style.display = 'flex';
+                document.getElementById('nav-burn-row').style.display = 'flex';
+                
+                let tPitch = (maneuver.targetAngle * (180/Math.PI)) % 360; 
+                if (tPitch < 0) tPitch += 360;
                 document.getElementById('nav-target').innerText = Math.round(tPitch) + '°';
+                
                 let dist = Math.sqrt(Math.pow(activeBody.position.x - maneuver.x, 2) + Math.pow(activeBody.position.y - maneuver.y, 2));
                 document.getElementById('nav-dist').innerText = (dist / 100).toFixed(1) + ' km';
-            } else { document.getElementById('nav-target-row').style.display = 'none'; document.getElementById('nav-dist-row').style.display = 'none'; }
+                
+                // Live DV Updater
+                document.getElementById('nav-burn').innerText = Math.max(0, maneuver.dv).toFixed(1) + ' m/s';
+            } else { 
+                document.getElementById('nav-target-row').style.display = 'none'; 
+                document.getElementById('nav-dist-row').style.display = 'none'; 
+                document.getElementById('nav-burn-row').style.display = 'none';
+            }
         }
 
         // --- 5. CORE FLIGHT LOOP ---
@@ -542,8 +553,25 @@
                 let dxM = MOON_POS.x - body.position.x, dyM = MOON_POS.y - body.position.y; let d2M = dxM*dxM + dyM*dyM, dM = Math.sqrt(d2M);
 
                 if (isLaunched) {
-                    if (d > PLANET_RADIUS) { Body.applyForce(body, body.position, {x: (dx/d)*(GRAVITY_CONSTANT / d2)*body.mass, y: (dy/d)*(GRAVITY_CONSTANT / d2)*body.mass}); }
-                    if (dM < MOON_SOI && dM > MOON_RADIUS) { Body.applyForce(body, body.position, {x: (dxM/dM)*(MOON_GRAVITY / d2M)*body.mass, y: (dyM/dM)*(MOON_GRAVITY / d2M)*body.mass}); }
+                    // FIX: True Patched Conics (1 Source of Gravity at a time)
+                    if (dM < MOON_SOI && dM > MOON_RADIUS) { 
+                        // Inside SOI: Moon Gravity + Earth Gravity applied to the Moon's center (keeps trajectory relative to Moon stable)
+                        let m_dx = PLANET_POS.x - MOON_POS.x, m_dy = PLANET_POS.y - MOON_POS.y;
+                        let m_d2 = m_dx*m_dx + m_dy*m_dy, m_d = Math.sqrt(m_d2);
+                        
+                        let earthAccX = (m_dx/m_d)*(GRAVITY_CONSTANT / m_d2);
+                        let earthAccY = (m_dy/m_d)*(GRAVITY_CONSTANT / m_d2);
+                        let moonAccX = (dxM/dM)*(MOON_GRAVITY / d2M);
+                        let moonAccY = (dyM/dM)*(MOON_GRAVITY / d2M);
+
+                        Body.applyForce(body, body.position, {
+                            x: (earthAccX + moonAccX) * body.mass, 
+                            y: (earthAccY + moonAccY) * body.mass
+                        });
+                    } else if (d > PLANET_RADIUS) {
+                        // Standard Earth Gravity
+                        Body.applyForce(body, body.position, {x: (dx/d)*(GRAVITY_CONSTANT / d2)*body.mass, y: (dy/d)*(GRAVITY_CONSTANT / d2)*body.mass}); 
+                    }
                 }
 
                 let isParachuteDeployed = body.blueprint.some(p => p.type === 'parachute' && p.deployed);
@@ -561,15 +589,28 @@
                         burningCount++; let hasFuel = false;
                         let validTanks = allTanks.filter(t => t.gridC === p.gridC && t.gridR <= p.gridR);
                         validTanks.sort((a,b) => b.gridR - a.gridR); 
+                        
                         for(let t of validTanks) {
                             let isBlocked = activeBody.blueprint.some(other => other.type === 'decoupler' && other.gridC === p.gridC && other.gridR < p.gridR && other.gridR > t.gridR );
                             if(isBlocked) continue;
+
                             stageFuelMax += t.fuel; stageFuelRemaining += t.fuelRemaining;
                             if(!hasFuel && t.fuelRemaining >= p.drain) { t.fuelRemaining -= p.drain; hasFuel = true; }
                         }
+                        
                         if (hasFuel) {
                             let subBody = activeBody.parts.find(sb => sb.partData && sb.partData.id === p.id);
-                            if(subBody) { Body.applyForce(activeBody, subBody.position, { x: p.thrust * Math.sin(activeBody.angle), y: -p.thrust * Math.cos(activeBody.angle) }); p.isBurning = true; }
+                            if(subBody) { 
+                                Body.applyForce(activeBody, subBody.position, { x: p.thrust * Math.sin(activeBody.angle), y: -p.thrust * Math.cos(activeBody.angle) }); 
+                                p.isBurning = true; 
+                                
+                                // FIX: Live Delta-V Burn Tracker Drain
+                                if (maneuver.active && maneuver.dv > 0) {
+                                    let actualDvTick = p.thrust / activeBody.mass;
+                                    maneuver.dv -= actualDvTick * 10;
+                                    if (maneuver.dv < 0.2) { clearNode(); }
+                                }
+                            }
                         } else { p.isBurning = false; }
                     }
                 });
@@ -589,17 +630,12 @@
             document.getElementById('tel-spd').innerText = Math.floor(Vector.magnitude(activeBody.velocity) * 10) + ' m/s';
             document.getElementById('tel-atmo').innerText = alt < ATMOSPHERE_HEIGHT ? Math.floor((1 - alt/ATMOSPHERE_HEIGHT)*100) + '%' : '0% (VAC)';
 
-            // FIX: Map Camera Dynamic Targeting
             if(isMapView) {
                 let targetX = mapOffsetX, targetY = mapOffsetY;
-                if (cameraTarget === 'ship' && shipBodies[activeShipIndex]) {
-                    targetX = shipBodies[activeShipIndex].position.x; targetY = shipBodies[activeShipIndex].position.y;
-                } else if (cameraTarget === 'moon') {
-                    targetX = MOON_POS.x; targetY = MOON_POS.y;
-                } else if (cameraTarget === 'planet') {
-                    targetX = PLANET_POS.x; targetY = PLANET_POS.y;
-                }
-                mapOffsetX = targetX; mapOffsetY = targetY; // keep synced for manual drag
+                if (cameraTarget === 'ship' && shipBodies[activeShipIndex]) { targetX = shipBodies[activeShipIndex].position.x; targetY = shipBodies[activeShipIndex].position.y; } 
+                else if (cameraTarget === 'moon') { targetX = MOON_POS.x; targetY = MOON_POS.y; } 
+                else if (cameraTarget === 'planet') { targetX = PLANET_POS.x; targetY = PLANET_POS.y; }
+                mapOffsetX = targetX; mapOffsetY = targetY; 
                 
                 let viewSpan = (PLANET_RADIUS * 1.5) * mapZoom;
                 Render.lookAt(render, { min: { x: targetX - viewSpan, y: targetY - viewSpan }, max: { x: targetX + viewSpan, y: targetY + viewSpan } });
@@ -636,7 +672,10 @@
                         inManeuver = true;
                         let vx = px - px_prev; let vy = py - py_prev;
                         let vMag = Math.sqrt(vx*vx + vy*vy);
-                        maneuver.targetAngle = Math.atan2(-vx, vy); 
+                        
+                        // FIX: Corrected Navball Heading Math
+                        maneuver.targetAngle = Math.atan2(vx, -vy); 
+                        
                         let proX = vx/vMag; let proY = vy/vMag;
                         let mjsDv = maneuver.dv / 10; 
                         px += proX * mjsDv; py += proY * mjsDv;
@@ -648,12 +687,9 @@
                 let mx = Math.sin(p_moonAngle) * MOON_DIST; let my = -Math.cos(p_moonAngle) * MOON_DIST;
                 let dxM = mx - px, dyM = my - py; let r2M = dxM*dxM + dyM*dyM; let rM = Math.sqrt(r2M);
 
-                // FIX: Log True Patched Conic Position
                 if(i % stepResolution === 0) { 
                     let pt = {x: px, y: py, inSOI: false}; 
-                    if (rM < MOON_SOI) {
-                        pt.inSOI = true; pt.relX = px - mx; pt.relY = py - my;
-                    }
+                    if (rM < MOON_SOI) { pt.inSOI = true; pt.relX = px - mx; pt.relY = py - my; }
                     if(!inManeuver) pathBase.push(pt); else pathPlanned.push(pt); 
                 }
                 
@@ -669,8 +705,21 @@
                 if (rM < minMoonDist) { minMoonDist = rM; encounterMarker = {x: px, y: py, moonX: mx, moonY: my, dist: rM}; }
                 if (rM < MOON_RADIUS) { if(!inManeuver) pathBase.push({x:px,y:py}); else pathPlanned.push({x:px,y:py}); break; } 
                 
-                let forceMagP = GRAVITY_CONSTANT / r2; let fx = -(px/r) * forceMagP; let fy = -(py/r) * forceMagP;
-                if (rM < MOON_SOI) { let forceMagM = MOON_GRAVITY / r2M; fx += (dxM/rM) * forceMagM; fy += (dyM/rM) * forceMagM; }
+                let fx = 0, fy = 0;
+                
+                // FIX: True Patched Conics Predictor Math
+                if (rM < MOON_SOI) {
+                    let m_dx = PLANET_POS.x - mx, m_dy = PLANET_POS.y - my;
+                    let m_d2 = m_dx*m_dx + m_dy*m_dy, m_d = Math.sqrt(m_d2);
+                    let earthForce = GRAVITY_CONSTANT / m_d2;
+                    fx = (m_dx/m_d) * earthForce; fy = (m_dy/m_d) * earthForce;
+                    
+                    let moonForce = MOON_GRAVITY / r2M;
+                    fx += (dxM/rM) * moonForce; fy += (dyM/rM) * moonForce;
+                } else {
+                    let earthForce = GRAVITY_CONSTANT / r2;
+                    fx = -(px/r) * earthForce; fy = -(py/r) * earthForce;
+                }
                 
                 let frictionAirVal = 0;
                 if (r < PLANET_RADIUS + ATMOSPHERE_HEIGHT) { let dens = 1 - ((r - PLANET_RADIUS) / ATMOSPHERE_HEIGHT); frictionAirVal = 0.005 * dens; }
@@ -762,7 +811,6 @@
             if (isMapView) {
                 let paths = getPredictivePath();
                 
-                // FIX: Draw Patched Conics
                 drawPatchedConic(ctx, paths.base, '#00f2ff', '#a855f7', false, bounds, scaleX, scaleY);
                 if (maneuver.active) drawPatchedConic(ctx, paths.planned, '#eab308', '#ec4899', true, bounds, scaleX, scaleY);
                 
