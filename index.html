@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V5.7 - Deep Space Encounters</title>
+    <title>Orbital Simulator V5.8 - Launchpad Fix</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -262,9 +262,7 @@
         const GRAVITY_CONSTANT = 1000000000; 
         const MOON_RADIUS = 180000, MOON_DIST = PLANET_RADIUS * 4.5, MOON_GRAVITY = GRAVITY_CONSTANT * 0.15, MOON_SOI = 800000; 
         
-        // FIX: Massively reduced Moon Orbit Speed
         let moonAngle = 0; const moonSpeed = 0.00004; let moonBody = null; let MOON_POS = {x: 0, y: 0};
-        
         let engine, render, flightLoopId, dynamicSurface;
         let mode = 'build', keys = {}, isLaunched = false, isMapView = false;
         let mapZoom = 1.0; let mapOffsetX = 0, mapOffsetY = 0; let isDraggingMap = false, lastMouse = {x: 0, y: 0}, dragDist = 0;
@@ -304,7 +302,8 @@
             engine = Engine.create({ positionIterations: 16, velocityIterations: 16 }); engine.gravity.scale = 0; 
             render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }});
             
-            dynamicSurface = Bodies.rectangle(0, PLANET_RADIUS + 40, 10000, 100, { isStatic: true, friction: 0.8 });
+            // Initial dummy surface, realigned in loop
+            dynamicSurface = Bodies.rectangle(0, PLANET_RADIUS + 50, 10000, 100, { isStatic: true, friction: 0.8 });
             
             MOON_POS = {x: Math.sin(moonAngle) * MOON_DIST, y: -Math.cos(moonAngle) * MOON_DIST};
             moonBody = Bodies.circle(MOON_POS.x, MOON_POS.y, MOON_RADIUS, { isStatic: true, friction: 1, render: { visible: false } });
@@ -324,7 +323,7 @@
 
             shipBodies = []; let masterBody = createCompoundBodyFromData(rawShipData, {x: 0, y: 0});
             let shipHeight = masterBody.bounds.max.y - masterBody.bounds.min.y;
-            Body.setPosition(masterBody, {x: 0, y: -PLANET_RADIUS - shipHeight/2});
+            Body.setPosition(masterBody, {x: 0, y: -PLANET_RADIUS - shipHeight/2 - 20});
             
             shipBodies.push(masterBody); activeShipIndex = 0;
 
@@ -504,9 +503,13 @@
         function gameLoop() {
             let activeBody = shipBodies[activeShipIndex]; if (!activeBody) return;
 
+            // FIX: Proper mathematical tangent for the dynamic planetary surface
             let angleToShip = Math.atan2(activeBody.position.y - PLANET_POS.y, activeBody.position.x - PLANET_POS.x);
-            Body.setPosition(dynamicSurface, { x: PLANET_POS.x + Math.cos(angleToShip) * (PLANET_RADIUS + 40), y: PLANET_POS.y + Math.sin(angleToShip) * (PLANET_RADIUS + 40) });
-            Body.setAngle(dynamicSurface, angleToShip);
+            Body.setPosition(dynamicSurface, { 
+                x: PLANET_POS.x + Math.cos(angleToShip) * (PLANET_RADIUS + 50), 
+                y: PLANET_POS.y + Math.sin(angleToShip) * (PLANET_RADIUS + 50) 
+            });
+            Body.setAngle(dynamicSurface, angleToShip + Math.PI/2); // Tangent!
 
             moonAngle += moonSpeed; MOON_POS.x = Math.sin(moonAngle) * MOON_DIST; MOON_POS.y = -Math.cos(moonAngle) * MOON_DIST;
             Body.setPosition(moonBody, MOON_POS);
@@ -590,7 +593,6 @@
             let px = activeBody.position.x, py = activeBody.position.y;
             let px_prev = px - activeBody.velocity.x; let py_prev = py - activeBody.velocity.y;
             
-            // FIX: Massively increased calculation steps to map paths all the way to the moon
             let steps = 900000; let stepResolution = 150; 
             
             let minR = Infinity, maxR = 0; orbitMarkers = { pe: null, ap: null };
@@ -625,7 +627,6 @@
                 let mx = Math.sin(p_moonAngle) * MOON_DIST; let my = -Math.cos(p_moonAngle) * MOON_DIST;
                 let dxM = mx - px, dyM = my - py; let r2M = dxM*dxM + dyM*dyM; let rM = Math.sqrt(r2M);
                 
-                // FIX: Store the exact future location of the Moon during the encounter!
                 if (rM < minMoonDist) { minMoonDist = rM; encounterMarker = {x: px, y: py, moonX: mx, moonY: my, dist: rM}; }
                 if (rM < MOON_RADIUS) { if(!inManeuver) pathBase.push({x:px,y:py}); else pathPlanned.push({x:px,y:py}); break; } 
                 
@@ -641,13 +642,10 @@
 
                 if (r > PLANET_RADIUS * 12) break; 
                 
-                // FIX: Dynamic Early Exit. Instantly stops calculating if your currently rendering orbit closes a loop. 
                 if (!forceFull && i > 1000) {
                     let anchorX = inManeuver ? maneuver.x : activeBody.position.x;
                     let anchorY = inManeuver ? maneuver.y : activeBody.position.y;
-                    let stepsSinceAnchor = inManeuver ? (i - maneuver.stepIndex) : i;
-                    
-                    if (stepsSinceAnchor > 1000 && Math.pow(px - anchorX, 2) + Math.pow(py - anchorY, 2) < 4000000 && rM > MOON_SOI) {
+                    if (Math.pow(px - anchorX, 2) + Math.pow(py - anchorY, 2) < 4000000 && rM > MOON_SOI) {
                         if(!inManeuver) pathBase.push({ x: px, y: py }); else pathPlanned.push({ x: px, y: py }); 
                         break;
                     }
@@ -713,7 +711,6 @@
                     ctx.beginPath(); ctx.arc(sx, sy, 6, 0, Math.PI*2); ctx.fillStyle = '#ef4444'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.stroke();
                 }
                 
-                // FIX: Draw the Encounter Marker and Ghost Moon based on the EXACT future predicted distance!
                 if (encounterMarker && encounterMarker.dist < MOON_SOI * 1.5) {
                     let sx = (encounterMarker.x - bounds.min.x) * scaleX, sy = (encounterMarker.y - bounds.min.y) * scaleY;
                     ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillText("CA", sx + 10, sy);
