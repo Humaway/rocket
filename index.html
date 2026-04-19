@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V5.4 - Maneuver Nodes & VAB Revert</title>
+    <title>Orbital Simulator V5.5 - Fuel Flow & Visual Polish</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -143,7 +143,7 @@
             'tank-large': { mass: 1.6, fuel: 40000, thrust: 0, w: 48, h: 98, type: 'tank' },
             'decoupler': { mass: 0.2, fuel: 0, thrust: 0, w: 48, h: 12, type: 'decoupler' },
             'radial': { mass: 0.2, fuel: 0, thrust: 0, w: 16, h: 40, type: 'radial' },
-            'leg': { mass: 0.1, fuel: 0, thrust: 0, w: 30, h: 60, type: 'leg' }, // FIX: Taller base hitbox to clear engines
+            'leg': { mass: 0.1, fuel: 0, thrust: 0, w: 30, h: 60, type: 'leg' }, 
             'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.0015, drain: 3.0, w: 30, h: 35, type: 'engine' }, 
             'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.005, drain: 10.0, w: 40, h: 45, type: 'engine' }, 
             'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.012, drain: 25.0, w: 48, h: 55, type: 'engine' }  
@@ -158,7 +158,7 @@
         let stagingList = [[]]; 
         let partIdCounter = 0;
 
-        gridState[0][5] = { type: 'pod', id: 'pod-0' }; // Center pod on Column 5
+        gridState[0][5] = { type: 'pod', id: 'pod-0' };
 
         for(let r=0; r<ROWS; r++) {
             for(let c=0; c<COLS; c++) {
@@ -312,7 +312,6 @@
         let shipBodies = []; let activeShipIndex = 0; let rawShipData = []; 
         let activeFlightStaging = []; 
 
-        // NEW: Maneuver Node State
         let maneuver = { active: false, stepIndex: 0, dv: 0, x: 0, y: 0 };
 
         function initiateLaunch() {
@@ -337,7 +336,6 @@
             buildPhysicsWorld();
         }
 
-        // FIX 1: Complete physics teardown to revert to VAB cleanly
         function revertToVAB() {
             cancelAnimationFrame(flightLoopId);
             Render.stop(render);
@@ -418,8 +416,6 @@
             
             if (e.code === 'Space' && isLaunched && !spacePressed) { spacePressed = true; executeStaging(); }
             if (e.code === 'KeyM') toggleMap();
-            
-            // FIX: Landing Gear Toggle
             if (e.code === 'KeyG') {
                 let activeBody = shipBodies[activeShipIndex];
                 if(activeBody) activeBody.blueprint.forEach(p => { if(p.type === 'leg') p.deployed = !p.deployed; });
@@ -432,7 +428,6 @@
             mapZoom += e.deltaY * 0.002 * mapZoom; mapZoom = Math.max(0.1, Math.min(mapZoom, 20));
         });
 
-        // MANEUVER NODE CLICK LOGIC
         window.addEventListener('mousedown', e => { 
             if(isMapView && e.target.tagName === 'CANVAS') { isDraggingMap = true; dragDist = 0; lastMouse = {x: e.clientX, y: e.clientY}; } 
         });
@@ -447,26 +442,19 @@
         });
         window.addEventListener('mouseup', e => { 
             if(isMapView && isDraggingMap && dragDist < 10 && e.target.tagName === 'CANVAS') {
-                // Clicked map without dragging: Try to place node
                 let bounds = render.bounds;
                 let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x);
                 let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
-                
-                let mWorldX = (e.clientX / scaleX) + bounds.min.x;
-                let mWorldY = (e.clientY / scaleY) + bounds.min.y;
+                let mWorldX = (e.clientX / scaleX) + bounds.min.x; let mWorldY = (e.clientY / scaleY) + bounds.min.y;
                 
                 let paths = getPredictivePath(true);
-                let closest = null; let minDist = 20 / scaleX; // 20px hit radius
+                let closest = null; let minDist = 20 / scaleX; 
                 
                 paths.base.forEach(pt => {
                     let d = Math.sqrt(Math.pow(pt.x - mWorldX, 2) + Math.pow(pt.y - mWorldY, 2));
                     if (d < minDist) { minDist = d; closest = pt; }
                 });
-                
-                if (closest) {
-                    maneuver = { active: true, stepIndex: closest.step, dv: 0, x: closest.x, y: closest.y };
-                    document.getElementById('node-ui').style.display = 'flex';
-                }
+                if (closest) { maneuver = { active: true, stepIndex: closest.step, dv: 0, x: closest.x, y: closest.y }; document.getElementById('node-ui').style.display = 'flex'; }
             }
             isDraggingMap = false; 
         });
@@ -613,9 +601,7 @@
             if (mode !== 'flight') return;
             flightLoopId = requestAnimationFrame(flightLoop);
             let steps = warpLevels[currentWarpIndex];
-            
             for(let i=0; i<steps; i++) { gameLoop(); Engine.update(engine, 16.666); }
-            
             Render.world(render); customRender(); 
         }
 
@@ -655,17 +641,30 @@
                     if(p.fuelRemaining > 0) availableTanks.push(p);
                 }
             });
-            availableTanks.sort((a,b) => b.gridR - a.gridR);
 
             if (isThrusting && isLaunched) {
                 activeBody.blueprint.forEach(p => {
                     if (p.type === 'engine' && p.staged) {
                         let hasFuel = false;
-                        for(let t of availableTanks) {
+                        
+                        // FIX: Strict column-based fuel draining logic. Searches vertically above the engine, stops at decouplers.
+                        let validTanks = availableTanks.filter(t => t.gridC === p.gridC && t.gridR <= p.gridR);
+                        validTanks.sort((a,b) => b.gridR - a.gridR); // drain bottom-up
+                        
+                        for(let t of validTanks) {
+                            let isBlocked = activeBody.blueprint.some(other => 
+                                other.type === 'decoupler' && 
+                                other.gridC === p.gridC &&
+                                other.gridR < p.gridR && 
+                                other.gridR > t.gridR
+                            );
+                            if(isBlocked) continue;
+
                             if(t.fuelRemaining >= p.drain) {
                                 t.fuelRemaining -= p.drain; stageFuelRemaining -= p.drain; hasFuel = true; break;
                             }
                         }
+                        
                         if (hasFuel) {
                             let subBody = activeBody.parts.find(sb => sb.partData && sb.partData.id === p.id);
                             if(subBody) {
@@ -717,17 +716,15 @@
             let pathBase = []; let pathPlanned = [];
             let inManeuver = false;
             
-            // Re-sync dynamic node position if active
             if (maneuver.active) { maneuver.x = 0; maneuver.y = 0; }
 
             for (let i = 0; i < steps; i++) { 
                 if (maneuver.active && i === maneuver.stepIndex) {
                     inManeuver = true; maneuver.x = px; maneuver.y = py;
-                    // Apply instant delta-V in prograde direction
                     let vx = px - px_prev; let vy = py - py_prev;
                     let vMag = Math.sqrt(vx*vx + vy*vy);
                     let proX = vx/vMag; let proY = vy/vMag;
-                    let mjsDv = maneuver.dv / 10; // scale standard m/s to internal units
+                    let mjsDv = maneuver.dv / 10; 
                     px += proX * mjsDv; py += proY * mjsDv;
                 }
 
@@ -746,17 +743,13 @@
                 
                 let dxM = mx - px, dyM = my - py; let r2M = dxM*dxM + dyM*dyM; let rM = Math.sqrt(r2M);
                 
-                // Track closest encounter
                 if (rM < minMoonDist) { minMoonDist = rM; encounterMarker = {x: px, y: py}; }
-                
                 if (rM < MOON_RADIUS) { if(!inManeuver) pathBase.push({x:px,y:py}); else pathPlanned.push({x:px,y:py}); break; } 
                 
                 let forceMagP = GRAVITY_CONSTANT / r2;
                 let fx = -(px/r) * forceMagP; let fy = -(py/r) * forceMagP;
                 
-                if (rM < MOON_SOI) {
-                    let forceMagM = MOON_GRAVITY / r2M; fx += (dxM/rM) * forceMagM; fy += (dyM/rM) * forceMagM;
-                }
+                if (rM < MOON_SOI) { let forceMagM = MOON_GRAVITY / r2M; fx += (dxM/rM) * forceMagM; fy += (dyM/rM) * forceMagM; }
                 
                 let frictionAirVal = 0;
                 if (r < PLANET_RADIUS + ATMOSPHERE_HEIGHT) { let dens = 1 - ((r - PLANET_RADIUS) / ATMOSPHERE_HEIGHT); frictionAirVal = 0.005 * dens; }
@@ -769,7 +762,6 @@
                 px_prev = px; py_prev = py; px += vx; py += vy;
 
                 if (r > PLANET_RADIUS * 12) break; 
-                // Only loop exit if we are NOT planning a maneuver (or we need to render the full planned path)
                 if (!forceFull && !maneuver.active && i > 1000 && Math.pow(px - activeBody.position.x, 2) + Math.pow(py - activeBody.position.y, 2) < 4000000 && rM > MOON_SOI) {
                     pathBase.push({ x: px, y: py }); break; 
                 }
@@ -785,18 +777,39 @@
 
             ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); 
             
-            // Planet
-            let pScreenX = (0 - bounds.min.x) * scaleX; let pScreenY = (0 - bounds.min.y) * scaleY; let pScreenRadius = PLANET_RADIUS * scaleX;
+            // FIX: True Curved Horizon for Flat Earth Bug
+            let pScreenRadius = PLANET_RADIUS * scaleX;
             if (pScreenRadius > 10000) {
-                let planetTopY = (PLANET_POS.y - PLANET_RADIUS - bounds.min.y) * scaleY;
-                ctx.fillStyle = '#0a1410'; ctx.fillRect(0, planetTopY, window.innerWidth, window.innerHeight * 2);
-                ctx.strokeStyle = '#122e20'; ctx.lineWidth = Math.max(5, 20 * scaleY); ctx.beginPath(); ctx.moveTo(0, planetTopY); ctx.lineTo(window.innerWidth, planetTopY); ctx.stroke();
+                let ship = shipBodies[activeShipIndex];
+                if(ship) {
+                    let dx = PLANET_POS.x - ship.position.x;
+                    let dy = PLANET_POS.y - ship.position.y;
+                    let angle = Math.atan2(dy, dx); 
+                    
+                    ctx.save();
+                    let sX = (ship.position.x - bounds.min.x) * scaleX;
+                    let sY = (ship.position.y - bounds.min.y) * scaleY;
+                    ctx.translate(sX, sY);
+                    ctx.rotate(angle - Math.PI/2); 
+                    
+                    let distToSurface = (Math.sqrt(dx*dx + dy*dy) - PLANET_RADIUS) * scaleX;
+                    
+                    ctx.fillStyle = '#0a1410'; 
+                    ctx.fillRect(-window.innerWidth*2, distToSurface, window.innerWidth*4, window.innerHeight*4);
+                    ctx.strokeStyle = '#122e20'; ctx.lineWidth = Math.max(5, 20 * scaleY);
+                    ctx.beginPath(); ctx.moveTo(-window.innerWidth*2, distToSurface); ctx.lineTo(window.innerWidth*2, distToSurface); ctx.stroke();
+                    ctx.restore();
+                }
             } else {
+                let pScreenX = (0 - bounds.min.x) * scaleX; let pScreenY = (0 - bounds.min.y) * scaleY;
                 ctx.fillStyle = '#0a1410'; ctx.beginPath(); ctx.arc(pScreenX, pScreenY, pScreenRadius, 0, 2*Math.PI); ctx.fill(); ctx.lineWidth = Math.max(2, 15*scaleX); ctx.strokeStyle = '#122e20'; ctx.stroke();
             }
 
             // Moon & Orbit Line
-            if (isMapView) { ctx.beginPath(); ctx.arc(pScreenX, pScreenY, MOON_DIST * scaleX, 0, Math.PI*2); ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 2; ctx.stroke(); }
+            if (isMapView) {
+                let pScreenX = (0 - bounds.min.x) * scaleX; let pScreenY = (0 - bounds.min.y) * scaleY;
+                ctx.beginPath(); ctx.arc(pScreenX, pScreenY, MOON_DIST * scaleX, 0, Math.PI*2); ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 2; ctx.stroke(); 
+            }
             let mScreenX = (MOON_POS.x - bounds.min.x) * scaleX; let mScreenY = (MOON_POS.y - bounds.min.y) * scaleY; let mScreenRadius = MOON_RADIUS * scaleX;
             ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(mScreenX, mScreenY, mScreenRadius, 0, 2*Math.PI); ctx.fill(); ctx.lineWidth = Math.max(1, 5*scaleX); ctx.strokeStyle = '#334155'; ctx.stroke();
 
@@ -807,12 +820,10 @@
             if (isMapView) {
                 let paths = getPredictivePath();
                 
-                // Base Path (Cyan)
                 if (paths.base.length > 1) {
                     ctx.beginPath(); ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 3;
                     paths.base.forEach((p, i) => { let sx = (p.x - bounds.min.x) * scaleX, sy = (p.y - bounds.min.y) * scaleY; if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy); }); ctx.stroke();
                 }
-                // Planned Path (Orange Dashed)
                 if (maneuver.active && paths.planned.length > 1) {
                     ctx.beginPath(); ctx.strokeStyle = '#eab308'; ctx.lineWidth = 3; ctx.setLineDash([10, 10]);
                     paths.planned.forEach((p, i) => { let sx = (p.x - bounds.min.x) * scaleX, sy = (p.y - bounds.min.y) * scaleY; if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy); }); ctx.stroke();
@@ -823,17 +834,14 @@
                 if(orbitMarkers.pe && !maneuver.active) { let sx = (orbitMarkers.pe.x - bounds.min.x) * scaleX, sy = (orbitMarkers.pe.y - bounds.min.y) * scaleY; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fill(); ctx.fillText("Pe", sx + 10, sy); }
                 if(orbitMarkers.ap && !maneuver.active) { let sx = (orbitMarkers.ap.x - bounds.min.x) * scaleX, sy = (orbitMarkers.ap.y - bounds.min.y) * scaleY; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fill(); ctx.fillText("Ap", sx + 10, sy); }
                 
-                // Draw Node Point
                 if (maneuver.active && maneuver.x !== 0) {
                     let sx = (maneuver.x - bounds.min.x) * scaleX, sy = (maneuver.y - bounds.min.y) * scaleY;
                     ctx.beginPath(); ctx.arc(sx, sy, 6, 0, Math.PI*2); ctx.fillStyle = '#ef4444'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.stroke();
                 }
                 
-                // Draw Closest Encounter 
                 if (encounterMarker && Math.sqrt(Math.pow(encounterMarker.x - MOON_POS.x, 2) + Math.pow(encounterMarker.y - MOON_POS.y, 2)) < MOON_SOI * 1.5) {
                     let sx = (encounterMarker.x - bounds.min.x) * scaleX, sy = (encounterMarker.y - bounds.min.y) * scaleY;
-                    ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill(); 
-                    ctx.fillText("CA", sx + 10, sy);
+                    ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillText("CA", sx + 10, sy);
                 }
             }
             ctx.restore();
@@ -850,13 +858,6 @@
                     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); 
                     let sx = (sub.position.x - bounds.min.x) * scaleX; let sy = (sub.position.y - bounds.min.y) * scaleY;
                     ctx.translate(sx, sy); ctx.rotate(body.angle); 
-                    
-                    // FIX: Visual Animation for Deploying Legs
-                    if (d.type === 'leg' && d.deployed) {
-                        let isLeft = d.localX < 0;
-                        ctx.rotate(isLeft ? Math.PI/6 : -Math.PI/6);
-                        ctx.translate(isLeft ? -10 : 10, 10);
-                    }
                     ctx.scale(scaleX, scaleY); 
 
                     if(d.type === 'pod') { ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.moveTo(0, -d.h/2); ctx.lineTo(d.w/2, d.h/2); ctx.lineTo(-d.w/2, d.h/2); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#0f172a'; ctx.fillRect(-10, 5, 20, 10); 
@@ -867,7 +868,21 @@
                     } else if (d.type === 'decoupler') { ctx.fillStyle = '#1e293b'; ctx.fillRect(-d.w/2, -d.h/2, d.w, d.h); ctx.fillStyle = '#eab308'; ctx.fillRect(-d.w/2, 0, d.w, 2); 
                     } else if (d.type === 'radial') { ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.moveTo(-d.w/2, -d.h/2); ctx.lineTo(d.w/2, -d.h/3); ctx.lineTo(d.w/2, d.h/3); ctx.lineTo(-d.w/2, d.h/2); ctx.closePath(); ctx.fill();
                     } else if (d.type === 'leg') {
-                        ctx.fillStyle = '#94a3b8'; ctx.beginPath(); let dir = d.localX < 0 ? 1 : -1; ctx.moveTo(-d.w/2, -d.h/2); ctx.lineTo(d.w/2, -d.h/2); ctx.lineTo(d.w/2 + (15*dir), d.h/2); ctx.lineTo(-d.w/2 + (5*dir), d.h/2); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#334155'; ctx.beginPath(); ctx.arc(d.w/2 + (10*dir), d.h/2, 5, 0, Math.PI*2); ctx.fill();
+                        // FIX: Precise hinge rotation for deployed landing legs
+                        ctx.fillStyle = '#94a3b8'; ctx.beginPath(); 
+                        let dir = d.localX < 0 ? 1 : -1; 
+                        
+                        ctx.save();
+                        let hingeX = dir === 1 ? d.w/2 : -d.w/2; 
+                        let hingeY = -d.h/2;
+                        
+                        ctx.translate(hingeX, hingeY);
+                        if (d.deployed) ctx.rotate(dir * Math.PI/4);
+                        ctx.translate(-hingeX, -hingeY);
+                        
+                        ctx.moveTo(-d.w/2, -d.h/2); ctx.lineTo(d.w/2, -d.h/2); ctx.lineTo(d.w/2 + (15*dir), d.h/2); ctx.lineTo(-d.w/2 + (5*dir), d.h/2); ctx.closePath(); ctx.fill(); 
+                        ctx.fillStyle = '#334155'; ctx.beginPath(); ctx.arc(d.w/2 + (10*dir), d.h/2, 5, 0, Math.PI*2); ctx.fill();
+                        ctx.restore();
                     } else if (d.type === 'parachute') {
                         if(d.deployed) { ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(0, -150, 80, Math.PI, 2*Math.PI); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-80, -150); ctx.lineTo(-10, -d.h/2); ctx.moveTo(80, -150); ctx.lineTo(10, -d.h/2); ctx.stroke(); }
                         ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(0, d.h/2, d.w/2, Math.PI, 2*Math.PI); ctx.fill();
