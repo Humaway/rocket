@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V6.1 - Perfect Patched Conics</title>
+    <title>Orbital Simulator V6.2 - The Lunar Landing Update</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -138,7 +138,7 @@
     <div id="node-ui" class="panel">
         <div style="color: #eab308; font-weight: bold; letter-spacing: 1px;">MANEUVER NODE</div>
         <span id="node-dv-readout" style="font-family: monospace; font-size: 1.4rem;">0.0 m/s</span>
-        <input type="range" id="node-slider" min="-150" max="150" step="0.5" value="0" oninput="updateNodeSlider(this.value)">
+        <input type="range" id="node-slider" min="-1000" max="1000" step="1" value="0" oninput="updateNodeSlider(this.value)">
         <div style="font-size: 0.8rem; color: #8892b0; margin-top: -5px;">PROGRADE Δv</div>
         <button onclick="clearNode()" style="margin-top: 5px; background: transparent; border: 1px solid #ef4444; color: #ef4444; border-radius: 4px; padding: 4px; cursor: pointer;">Delete Node</button>
     </div>
@@ -150,7 +150,7 @@
     </div>
 
     <script>
-        // --- 1. PART DATABASE (FIX: BUFFED THRUSTERS) ---
+        // --- 1. PART DATABASE (FIX: NERFED HEAVY, INCREASED DRAIN) ---
         const PART_DATA = {
             'pod': { mass: 1.0, fuel: 0, thrust: 0, w: 40, h: 48, type: 'pod' },
             'parachute': { mass: 0.1, fuel: 0, thrust: 0, w: 30, h: 20, type: 'parachute' },
@@ -159,9 +159,9 @@
             'decoupler': { mass: 0.2, fuel: 0, thrust: 0, w: 48, h: 12, type: 'decoupler' },
             'radial': { mass: 0.2, fuel: 0, thrust: 0, w: 16, h: 40, type: 'radial' },
             'leg': { mass: 0.1, fuel: 0, thrust: 0, w: 10, h: 40, type: 'leg' }, 
-            'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.005, drain: 4.0, w: 30, h: 35, type: 'engine' }, 
-            'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.018, drain: 12.0, w: 40, h: 45, type: 'engine' }, 
-            'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.045, drain: 30.0, w: 48, h: 55, type: 'engine' }  
+            'engine-vac': { mass: 0.4, fuel: 0, thrust: 0.002, drain: 5.0, w: 30, h: 35, type: 'engine' }, 
+            'engine-boost': { mass: 1.0, fuel: 0, thrust: 0.007, drain: 15.0, w: 40, h: 45, type: 'engine' }, 
+            'engine-heavy': { mass: 2.5, fuel: 0, thrust: 0.02, drain: 45.0, w: 48, h: 55, type: 'engine' }  
         };
 
         // --- 2. VAB GRID & STAGING LOGIC ---
@@ -278,6 +278,8 @@
         let warpLevels = [1, 2, 5, 10, 20]; let currentWarpIndex = 0;
         let shipBodies = []; let activeShipIndex = 0; let rawShipData = []; let activeFlightStaging = []; 
         let maneuver = { active: false, dv: 0, x: 0, y: 0, targetAngle: 0, inSOI: false, relX: 0, relY: 0 };
+        
+        let liveVelocityTracker = {x: 0, y: 0};
 
         function initiateLaunch() {
             let hasPod = false, hasEngine = false;
@@ -511,7 +513,23 @@
             if (mode !== 'flight') return;
             flightLoopId = requestAnimationFrame(flightLoop);
             let steps = warpLevels[currentWarpIndex];
+            
+            // Pre-loop velocity for delta-v tracking
+            let activeBody = shipBodies[activeShipIndex];
+            if(activeBody) { liveVelocityTracker.x = activeBody.velocity.x; liveVelocityTracker.y = activeBody.velocity.y; }
+
             for(let i=0; i<steps; i++) { gameLoop(); Engine.update(engine, 16.666); }
+            
+            // FIX: True Live Delta-V Burn Sync
+            if (activeBody && maneuver.active && maneuver.dv !== 0 && keys['KeyW']) {
+                let dx = activeBody.velocity.x - liveVelocityTracker.x;
+                let dy = activeBody.velocity.y - liveVelocityTracker.y;
+                let actualDv = Math.sqrt(dx*dx + dy*dy) * 10; // Match display speed multiplier
+                if (maneuver.dv > 0) maneuver.dv -= actualDv;
+                else maneuver.dv += actualDv;
+                if (Math.abs(maneuver.dv) < 1.0) clearNode();
+            }
+
             updateNavBall();
             Render.world(render); customRender(); 
         }
@@ -523,23 +541,25 @@
             Body.setPosition(dynamicSurface, { x: PLANET_POS.x + Math.cos(angleToShip) * (PLANET_RADIUS + 50), y: PLANET_POS.y + Math.sin(angleToShip) * (PLANET_RADIUS + 50) });
             Body.setAngle(dynamicSurface, angleToShip + Math.PI/2); 
 
-            moonAngle += moonSpeed; MOON_POS.x = Math.sin(moonAngle) * MOON_DIST; MOON_POS.y = -Math.cos(moonAngle) * MOON_DIST;
+            // FIX: Track exact Moon velocity for relative physics
+            let prevMoonX = MOON_POS.x, prevMoonY = MOON_POS.y;
+            moonAngle += moonSpeed; 
+            MOON_POS.x = Math.sin(moonAngle) * MOON_DIST; MOON_POS.y = -Math.cos(moonAngle) * MOON_DIST;
             Body.setPosition(moonBody, MOON_POS);
+            let moonVelX = MOON_POS.x - prevMoonX; let moonVelY = MOON_POS.y - prevMoonY;
 
             let distToMoon = Math.sqrt(Math.pow(MOON_POS.x - activeBody.position.x, 2) + Math.pow(MOON_POS.y - activeBody.position.y, 2));
             
+            // FIX: Relative Velocity Calculation
+            let relVelX = activeBody.velocity.x; let relVelY = activeBody.velocity.y;
+            if (distToMoon < MOON_SOI) { relVelX -= moonVelX; relVelY -= moonVelY; }
+
             if (sasMode !== 'off' && isLaunched) {
                 let targetA = 0;
-                let relVel = { x: activeBody.velocity.x, y: activeBody.velocity.y };
-                if (distToMoon < MOON_SOI) {
-                    let mvx = Math.cos(moonAngle) * MOON_DIST * moonSpeed; let mvy = Math.sin(moonAngle) * MOON_DIST * moonSpeed;
-                    relVel.x -= mvx; relVel.y -= mvy;
-                }
-
-                // FIX: Corrected Navball Math for HTML Canvas inverted Y
+                
                 if (sasMode === 'maneuver' && maneuver.active) { targetA = maneuver.targetAngle; } 
-                else if (sasMode === 'prograde') { targetA = Math.atan2(relVel.x, -relVel.y); } 
-                else if (sasMode === 'retrograde') { targetA = Math.atan2(-relVel.x, relVel.y); }
+                else if (sasMode === 'prograde') { targetA = Math.atan2(relVelX, -relVelY); } 
+                else if (sasMode === 'retrograde') { targetA = Math.atan2(-relVelX, relVelY); }
 
                 let currA = activeBody.angle; let diff = targetA - currA;
                 while (diff <= -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2;
@@ -556,15 +576,9 @@
                 let dxM = MOON_POS.x - body.position.x, dyM = MOON_POS.y - body.position.y; let d2M = dxM*dxM + dyM*dyM, dM = Math.sqrt(d2M);
 
                 if (isLaunched) {
-                    // FIX: True Patched Conics Frame Translation
                     if (dM < MOON_SOI && dM > MOON_RADIUS) { 
-                        let dt = 16.666;
-                        let moonFrameAccX = -(Math.pow(moonSpeed, 2) * MOON_POS.x) / Math.pow(dt, 2);
-                        let moonFrameAccY = -(Math.pow(moonSpeed, 2) * MOON_POS.y) / Math.pow(dt, 2);
-                        let moonGravX = (dxM/dM)*(MOON_GRAVITY / d2M);
-                        let moonGravY = (dyM/dM)*(MOON_GRAVITY / d2M);
-
-                        Body.applyForce(body, body.position, { x: (moonFrameAccX + moonGravX) * body.mass, y: (moonFrameAccY + moonGravY) * body.mass });
+                        // Perfectly stable lunar orbit: apply only Moon's gravity
+                        Body.applyForce(body, body.position, {x: (dxM/dM)*(MOON_GRAVITY / d2M)*body.mass, y: (dyM/dM)*(MOON_GRAVITY / d2M)*body.mass}); 
                     } else if (d > PLANET_RADIUS) {
                         Body.applyForce(body, body.position, {x: (dx/d)*(GRAVITY_CONSTANT / d2)*body.mass, y: (dy/d)*(GRAVITY_CONSTANT / d2)*body.mass}); 
                     }
@@ -599,15 +613,6 @@
                             if(subBody) { 
                                 Body.applyForce(activeBody, subBody.position, { x: p.thrust * Math.sin(activeBody.angle), y: -p.thrust * Math.cos(activeBody.angle) }); 
                                 p.isBurning = true; 
-                                
-                                // FIX: Live Delta-V Burn Tracker
-                                if (maneuver.active && maneuver.dv !== 0) {
-                                    let actualDvTick = (p.thrust / activeBody.mass) * 16.666 * 10;
-                                    if (maneuver.dv > 0) maneuver.dv -= actualDvTick;
-                                    else maneuver.dv += actualDvTick;
-                                    
-                                    if (Math.abs(maneuver.dv) < 1.0) clearNode();
-                                }
                             }
                         } else { p.isBurning = false; }
                     }
@@ -623,19 +628,15 @@
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity + 0.0003);
             }
 
-            let dist = Vector.magnitude(activeBody.position); let alt = dist - PLANET_RADIUS;
-            document.getElementById('tel-alt').innerText = (alt / 100).toFixed(1) + ' km';
-            document.getElementById('tel-atmo').innerText = alt < ATMOSPHERE_HEIGHT ? Math.floor((1 - alt/ATMOSPHERE_HEIGHT)*100) + '%' : '0% (VAC)';
+            document.getElementById('tel-alt').innerText = ((distToMoon < MOON_SOI ? (distToMoon - MOON_RADIUS) : (dist - PLANET_RADIUS)) / 100).toFixed(1) + ' km';
+            document.getElementById('tel-atmo').innerText = dist - PLANET_RADIUS < ATMOSPHERE_HEIGHT ? Math.floor((1 - (dist - PLANET_RADIUS)/ATMOSPHERE_HEIGHT)*100) + '%' : '0% (VAC)';
 
-            let relVel = { x: activeBody.velocity.x, y: activeBody.velocity.y };
             if (distToMoon < MOON_SOI) {
                 document.getElementById('tel-soi').innerText = 'MOON'; document.getElementById('tel-soi').style.color = '#a855f7';
-                let mvx = Math.cos(moonAngle) * MOON_DIST * moonSpeed; let mvy = Math.sin(moonAngle) * MOON_DIST * moonSpeed;
-                relVel.x -= mvx; relVel.y -= mvy;
             } else {
                 document.getElementById('tel-soi').innerText = 'EARTH'; document.getElementById('tel-soi').style.color = '#00f2ff';
             }
-            let displaySpeed = Math.sqrt(relVel.x*relVel.x + relVel.y*relVel.y) * 10;
+            let displaySpeed = Math.sqrt(relVelX*relVelX + relVelY*relVelY) * 10;
             document.getElementById('tel-spd').innerText = Math.floor(displaySpeed) + ' m/s';
 
             if(isMapView) {
@@ -648,7 +649,9 @@
                 let viewSpan = (PLANET_RADIUS * 1.5) * mapZoom;
                 Render.lookAt(render, { min: { x: targetX - viewSpan, y: targetY - viewSpan }, max: { x: targetX + viewSpan, y: targetY + viewSpan } });
             } else {
+                let alt = dist - PLANET_RADIUS;
                 let zoom = 1 + (Math.max(0, alt) * 0.00005); zoom = Math.min(zoom, 5.0);
+                if (distToMoon < MOON_SOI) { zoom = 1 + (Math.max(0, distToMoon - MOON_RADIUS) * 0.0002); zoom = Math.min(zoom, 5.0); }
                 Render.lookAt(render, { min: { x: activeBody.position.x - (window.innerWidth/2)*zoom, y: activeBody.position.y - (window.innerHeight/2)*zoom }, max: { x: activeBody.position.x + (window.innerWidth/2)*zoom, y: activeBody.position.y + (window.innerHeight/2)*zoom } });
             }
         }
@@ -660,11 +663,15 @@
         function getPredictivePath(forceFull = false) {
             let activeBody = shipBodies[activeShipIndex]; if (!activeBody || !isLaunched) return { base: [], planned: [] };
             
-            let dtSq = Math.pow(16.666, 2); 
-            let px = activeBody.position.x, py = activeBody.position.y;
-            let px_prev = px - activeBody.velocity.x; let py_prev = py - activeBody.velocity.y;
+            // FIX: Optimization - Predict 4 ticks of time per calculation to extend range
+            let timeStepMult = 4;
+            let dt = 16.666 * timeStepMult;
+            let dtSq = Math.pow(dt, 2); 
             
-            let steps = 900000; let stepResolution = 150; 
+            let px = activeBody.position.x, py = activeBody.position.y;
+            let px_prev = px - (activeBody.velocity.x * timeStepMult); let py_prev = py - (activeBody.velocity.y * timeStepMult);
+            
+            let steps = 150000; let stepResolution = 20; // 150,000 * 4 = 600,000 standard ticks 
             
             let minR = Infinity, maxR = 0; let minMoonR = Infinity, maxMoonR = 0;
             orbitMarkers = { pe: null, ap: null, moonPe: null, moonAp: null };
@@ -675,7 +682,6 @@
 
             for (let i = 0; i < steps; i++) { 
                 
-                // FIX: Maneuver Tracking
                 if (maneuver.active && !inManeuver) {
                     let nX = maneuver.inSOI ? MOON_POS.x + maneuver.relX : maneuver.x;
                     let nY = maneuver.inSOI ? MOON_POS.y + maneuver.relY : maneuver.y;
@@ -690,13 +696,13 @@
                         if (maneuver.dv < 0) maneuver.targetAngle += Math.PI; 
                         
                         let proX = vx/vMag; let proY = vy/vMag;
-                        let mjsDv = maneuver.dv / 10; 
+                        let mjsDv = (maneuver.dv / 10) * timeStepMult; 
                         px += proX * mjsDv; py += proY * mjsDv;
                     }
                 }
 
                 let r2 = px*px + py*py; let r = Math.sqrt(r2);
-                let p_moonAngle = moonAngle + (i * moonSpeed); 
+                let p_moonAngle = moonAngle + (i * moonSpeed * timeStepMult); 
                 let mx = Math.sin(p_moonAngle) * MOON_DIST; let my = -Math.cos(p_moonAngle) * MOON_DIST;
                 let dxM = mx - px, dyM = my - py; let r2M = dxM*dxM + dyM*dyM; let rM = Math.sqrt(r2M);
 
@@ -720,16 +726,9 @@
                 
                 let fx = 0, fy = 0;
                 
-                // FIX: True Patched Conics predictor math
                 if (rM < MOON_SOI) {
-                    let dt = 16.666;
-                    let moonFrameAccX = -(Math.pow(moonSpeed, 2) * mx) / Math.pow(dt, 2);
-                    let moonFrameAccY = -(Math.pow(moonSpeed, 2) * my) / Math.pow(dt, 2);
-                    let moonGravX = (dxM/rM)*(MOON_GRAVITY / r2M);
-                    let moonGravY = (dyM/rM)*(MOON_GRAVITY / r2M);
-
-                    fx = moonFrameAccX + moonGravX;
-                    fy = moonFrameAccY + moonGravY;
+                    let moonForce = MOON_GRAVITY / r2M;
+                    fx = (dxM/rM) * moonForce; fy = (dyM/rM) * moonForce;
                 } else {
                     let earthForce = GRAVITY_CONSTANT / r2;
                     fx = -(px/r) * earthForce; fy = -(py/r) * earthForce;
@@ -744,10 +743,10 @@
 
                 if (r > PLANET_RADIUS * 12) break; 
                 
-                if (!forceFull && i > 1000) {
+                if (!forceFull && i > 500) {
                     let anchorX = inManeuver ? maneuver.x : activeBody.position.x; let anchorY = inManeuver ? maneuver.y : activeBody.position.y;
-                    let stepsSince = inManeuver ? (i - maneuver.stepIndex) : i;
-                    if (stepsSince > 1000 && Math.pow(px - anchorX, 2) + Math.pow(py - anchorY, 2) < 4000000 && rM > MOON_SOI) {
+                    let stepsSince = inManeuver ? (i - (maneuver.stepIndex || 0)) : i;
+                    if (stepsSince > 500 && Math.pow(px - anchorX, 2) + Math.pow(py - anchorY, 2) < 4000000 && rM > MOON_SOI) {
                         if(!inManeuver) pathBase.push({ x: px, y: py }); else pathPlanned.push({ x: px, y: py }); 
                         break;
                     }
