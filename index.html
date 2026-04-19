@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V5.8 - Launchpad Fix</title>
+    <title>Orbital Simulator V5.8 - Patched Conics & Camera Tracking</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -143,7 +143,7 @@
         <button onclick="clearNode()" style="margin-top: 5px; background: transparent; border: 1px solid #ef4444; color: #ef4444; border-radius: 4px; padding: 4px; cursor: pointer;">Delete Node</button>
     </div>
 
-    <div id="controls-help">[W] Throttle | [A/D] Steer | [SPACE] Stage | [G] Legs | [M] Map | Click Map for Nodes</div>
+    <div id="controls-help">[W] Throttle | [A/D] Steer | [SPACE] Stage | [G] Legs | [M] Map | Dbl-Click Map to Focus</div>
 
     <script>
         // --- 1. PART DATABASE ---
@@ -264,10 +264,14 @@
         
         let moonAngle = 0; const moonSpeed = 0.00004; let moonBody = null; let MOON_POS = {x: 0, y: 0};
         let engine, render, flightLoopId, dynamicSurface;
-        let mode = 'build', keys = {}, isLaunched = false, isMapView = false;
-        let mapZoom = 1.0; let mapOffsetX = 0, mapOffsetY = 0; let isDraggingMap = false, lastMouse = {x: 0, y: 0}, dragDist = 0;
-        let warpLevels = [1, 2, 5, 10, 20]; let currentWarpIndex = 0;
         
+        let mode = 'build', keys = {}, isLaunched = false, isMapView = false;
+        
+        // MAP CAMERA TRACKING STATE
+        let cameraTarget = 'ship'; // 'ship', 'moon', 'planet', 'manual'
+        let mapZoom = 1.0; let mapOffsetX = 0, mapOffsetY = 0; let isDraggingMap = false, lastMouse = {x: 0, y: 0}, dragDist = 0;
+        
+        let warpLevels = [1, 2, 5, 10, 20]; let currentWarpIndex = 0;
         let shipBodies = []; let activeShipIndex = 0; let rawShipData = []; let activeFlightStaging = []; 
         let maneuver = { active: false, dv: 0, x: 0, y: 0, targetAngle: 0 };
 
@@ -286,6 +290,7 @@
             document.getElementById('warp-ui').style.display = 'flex'; document.getElementById('controls-help').style.display = 'block';
             mode = 'flight'; isMapView = false; document.getElementById('map-toggle').innerText = "[M] MAP VIEW: OFF";
             maneuver.active = false; document.getElementById('node-ui').style.display = 'none';
+            cameraTarget = 'ship';
             
             buildPhysicsWorld();
         }
@@ -302,7 +307,6 @@
             engine = Engine.create({ positionIterations: 16, velocityIterations: 16 }); engine.gravity.scale = 0; 
             render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }});
             
-            // Initial dummy surface, realigned in loop
             dynamicSurface = Bodies.rectangle(0, PLANET_RADIUS + 50, 10000, 100, { isStatic: true, friction: 0.8 });
             
             MOON_POS = {x: Math.sin(moonAngle) * MOON_DIST, y: -Math.cos(moonAngle) * MOON_DIST};
@@ -356,8 +360,14 @@
         });
         window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'Space') spacePressed = false; });
         
-        window.addEventListener('wheel', e => { if(isMapView) { mapZoom += e.deltaY * 0.002 * mapZoom; mapZoom = Math.max(0.1, Math.min(mapZoom, 20)); } });
-        window.addEventListener('mousedown', e => { if(isMapView && e.target.tagName === 'CANVAS') { isDraggingMap = true; dragDist = 0; lastMouse = {x: e.clientX, y: e.clientY}; } });
+        window.addEventListener('wheel', e => { 
+            if(isMapView) { mapZoom += e.deltaY * 0.002 * mapZoom; mapZoom = Math.max(0.02, Math.min(mapZoom, 20)); } 
+        });
+        
+        window.addEventListener('mousedown', e => { 
+            if(isMapView && e.target.tagName === 'CANVAS') { isDraggingMap = true; dragDist = 0; lastMouse = {x: e.clientX, y: e.clientY}; cameraTarget = 'manual'; } 
+        });
+        
         window.addEventListener('mousemove', e => {
             if(isDraggingMap && isMapView) {
                 let dx = e.clientX - lastMouse.x; let dy = e.clientY - lastMouse.y; dragDist += Math.abs(dx) + Math.abs(dy);
@@ -365,16 +375,37 @@
                 lastMouse = {x: e.clientX, y: e.clientY};
             }
         });
+        
         window.addEventListener('mouseup', e => { 
             if(isMapView && isDraggingMap && dragDist < 10 && e.target.tagName === 'CANVAS') {
                 let bounds = render.bounds; let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x); let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
                 let mWorldX = (e.clientX / scaleX) + bounds.min.x; let mWorldY = (e.clientY / scaleY) + bounds.min.y;
                 let paths = getPredictivePath(true); let closest = null; let minDist = 20 / scaleX; 
-                paths.base.forEach(pt => { let d = Math.sqrt(Math.pow(pt.x - mWorldX, 2) + Math.pow(pt.y - mWorldY, 2)); if (d < minDist) { minDist = d; closest = pt; } });
+                paths.base.forEach(pt => { 
+                    // Need to check absolute hit coords even if point was stored relative
+                    let px = pt.inSOI ? MOON_POS.x + pt.relX : pt.x;
+                    let py = pt.inSOI ? MOON_POS.y + pt.relY : pt.y;
+                    let d = Math.sqrt(Math.pow(px - mWorldX, 2) + Math.pow(py - mWorldY, 2)); if (d < minDist) { minDist = d; closest = pt; } 
+                });
                 
                 if (closest) { maneuver = { active: true, dv: 0, x: closest.x, y: closest.y, targetAngle: 0 }; document.getElementById('node-ui').style.display = 'flex'; updateNavBall(); }
             }
             isDraggingMap = false; 
+        });
+
+        // FIX: Double click to focus camera
+        window.addEventListener('dblclick', e => {
+            if(isMapView && e.target.tagName === 'CANVAS') {
+                let bounds = render.bounds; let scaleX = window.innerWidth / (bounds.max.x - bounds.min.x); let scaleY = window.innerHeight / (bounds.max.y - bounds.min.y);
+                let mWorldX = (e.clientX / scaleX) + bounds.min.x; let mWorldY = (e.clientY / scaleY) + bounds.min.y;
+                
+                let dMoon = Math.sqrt(Math.pow(MOON_POS.x - mWorldX, 2) + Math.pow(MOON_POS.y - mWorldY, 2));
+                let dPlanet = Math.sqrt(Math.pow(PLANET_POS.x - mWorldX, 2) + Math.pow(PLANET_POS.y - mWorldY, 2));
+                
+                if (dMoon < MOON_RADIUS * 4) { cameraTarget = 'moon'; } 
+                else if (dPlanet < PLANET_RADIUS * 1.5) { cameraTarget = 'planet'; } 
+                else { cameraTarget = 'ship'; }
+            }
         });
 
         function adjNode(amt) { maneuver.dv += amt; document.getElementById('node-dv-readout').innerText = maneuver.dv + ' m/s'; updateNavBall(); }
@@ -382,7 +413,7 @@
 
         function toggleMap() { 
             isMapView = !isMapView; document.getElementById('map-toggle').innerText = isMapView ? "[M] MAP VIEW: ON" : "[M] MAP VIEW: OFF"; 
-            if(isMapView && shipBodies[activeShipIndex]) { mapOffsetX = shipBodies[activeShipIndex].position.x; mapOffsetY = shipBodies[activeShipIndex].position.y; mapZoom = 1.0; }
+            if(isMapView && shipBodies[activeShipIndex]) { cameraTarget = 'ship'; mapZoom = 1.0; }
             if(!isMapView) document.getElementById('node-ui').style.display = 'none'; else if (maneuver.active) document.getElementById('node-ui').style.display = 'flex';
         }
 
@@ -475,19 +506,12 @@
             document.getElementById('nav-pitch').innerText = Math.round(pitch) + '°';
 
             if (maneuver.active) {
-                document.getElementById('nav-target-row').style.display = 'flex';
-                document.getElementById('nav-dist-row').style.display = 'flex';
-                
-                let tPitch = (maneuver.targetAngle * (180/Math.PI)) % 360;
-                if (tPitch < 0) tPitch += 360;
+                document.getElementById('nav-target-row').style.display = 'flex'; document.getElementById('nav-dist-row').style.display = 'flex';
+                let tPitch = (maneuver.targetAngle * (180/Math.PI)) % 360; if (tPitch < 0) tPitch += 360;
                 document.getElementById('nav-target').innerText = Math.round(tPitch) + '°';
-                
                 let dist = Math.sqrt(Math.pow(activeBody.position.x - maneuver.x, 2) + Math.pow(activeBody.position.y - maneuver.y, 2));
                 document.getElementById('nav-dist').innerText = (dist / 100).toFixed(1) + ' km';
-            } else {
-                document.getElementById('nav-target-row').style.display = 'none';
-                document.getElementById('nav-dist-row').style.display = 'none';
-            }
+            } else { document.getElementById('nav-target-row').style.display = 'none'; document.getElementById('nav-dist-row').style.display = 'none'; }
         }
 
         // --- 5. CORE FLIGHT LOOP ---
@@ -503,13 +527,9 @@
         function gameLoop() {
             let activeBody = shipBodies[activeShipIndex]; if (!activeBody) return;
 
-            // FIX: Proper mathematical tangent for the dynamic planetary surface
             let angleToShip = Math.atan2(activeBody.position.y - PLANET_POS.y, activeBody.position.x - PLANET_POS.x);
-            Body.setPosition(dynamicSurface, { 
-                x: PLANET_POS.x + Math.cos(angleToShip) * (PLANET_RADIUS + 50), 
-                y: PLANET_POS.y + Math.sin(angleToShip) * (PLANET_RADIUS + 50) 
-            });
-            Body.setAngle(dynamicSurface, angleToShip + Math.PI/2); // Tangent!
+            Body.setPosition(dynamicSurface, { x: PLANET_POS.x + Math.cos(angleToShip) * (PLANET_RADIUS + 50), y: PLANET_POS.y + Math.sin(angleToShip) * (PLANET_RADIUS + 50) });
+            Body.setAngle(dynamicSurface, angleToShip + Math.PI/2); 
 
             moonAngle += moonSpeed; MOON_POS.x = Math.sin(moonAngle) * MOON_DIST; MOON_POS.y = -Math.cos(moonAngle) * MOON_DIST;
             Body.setPosition(moonBody, MOON_POS);
@@ -538,20 +558,15 @@
                 let burningCount = 0;
                 activeBody.blueprint.forEach(p => {
                     if (p.type === 'engine' && p.staged) {
-                        burningCount++;
-                        let hasFuel = false;
-                        
+                        burningCount++; let hasFuel = false;
                         let validTanks = allTanks.filter(t => t.gridC === p.gridC && t.gridR <= p.gridR);
                         validTanks.sort((a,b) => b.gridR - a.gridR); 
-                        
                         for(let t of validTanks) {
                             let isBlocked = activeBody.blueprint.some(other => other.type === 'decoupler' && other.gridC === p.gridC && other.gridR < p.gridR && other.gridR > t.gridR );
                             if(isBlocked) continue;
-
                             stageFuelMax += t.fuel; stageFuelRemaining += t.fuelRemaining;
                             if(!hasFuel && t.fuelRemaining >= p.drain) { t.fuelRemaining -= p.drain; hasFuel = true; }
                         }
-                        
                         if (hasFuel) {
                             let subBody = activeBody.parts.find(sb => sb.partData && sb.partData.id === p.id);
                             if(subBody) { Body.applyForce(activeBody, subBody.position, { x: p.thrust * Math.sin(activeBody.angle), y: -p.thrust * Math.cos(activeBody.angle) }); p.isBurning = true; }
@@ -574,17 +589,29 @@
             document.getElementById('tel-spd').innerText = Math.floor(Vector.magnitude(activeBody.velocity) * 10) + ' m/s';
             document.getElementById('tel-atmo').innerText = alt < ATMOSPHERE_HEIGHT ? Math.floor((1 - alt/ATMOSPHERE_HEIGHT)*100) + '%' : '0% (VAC)';
 
+            // FIX: Map Camera Dynamic Targeting
             if(isMapView) {
+                let targetX = mapOffsetX, targetY = mapOffsetY;
+                if (cameraTarget === 'ship' && shipBodies[activeShipIndex]) {
+                    targetX = shipBodies[activeShipIndex].position.x; targetY = shipBodies[activeShipIndex].position.y;
+                } else if (cameraTarget === 'moon') {
+                    targetX = MOON_POS.x; targetY = MOON_POS.y;
+                } else if (cameraTarget === 'planet') {
+                    targetX = PLANET_POS.x; targetY = PLANET_POS.y;
+                }
+                mapOffsetX = targetX; mapOffsetY = targetY; // keep synced for manual drag
+                
                 let viewSpan = (PLANET_RADIUS * 1.5) * mapZoom;
-                Render.lookAt(render, { min: { x: mapOffsetX - viewSpan, y: mapOffsetY - viewSpan }, max: { x: mapOffsetX + viewSpan, y: mapOffsetY + viewSpan } });
+                Render.lookAt(render, { min: { x: targetX - viewSpan, y: targetY - viewSpan }, max: { x: targetX + viewSpan, y: targetY + viewSpan } });
             } else {
                 let zoom = 1 + (Math.max(0, alt) * 0.00005); zoom = Math.min(zoom, 5.0);
                 Render.lookAt(render, { min: { x: activeBody.position.x - (window.innerWidth/2)*zoom, y: activeBody.position.y - (window.innerHeight/2)*zoom }, max: { x: activeBody.position.x + (window.innerWidth/2)*zoom, y: activeBody.position.y + (window.innerHeight/2)*zoom } });
             }
         }
 
-        // --- 6. PREDICTOR & MANEUVER LOGIC ---
-        let orbitMarkers = { pe: null, ap: null }; let encounterMarker = null;
+        // --- 6. PREDICTOR & PATCHED CONICS ---
+        let orbitMarkers = { pe: null, ap: null, moonPe: null, moonAp: null }; 
+        let encounterMarker = null;
         
         function getPredictivePath(forceFull = false) {
             let activeBody = shipBodies[activeShipIndex]; if (!activeBody || !isLaunched) return { base: [], planned: [] };
@@ -595,14 +622,14 @@
             
             let steps = 900000; let stepResolution = 150; 
             
-            let minR = Infinity, maxR = 0; orbitMarkers = { pe: null, ap: null };
+            let minR = Infinity, maxR = 0; let minMoonR = Infinity, maxMoonR = 0;
+            orbitMarkers = { pe: null, ap: null, moonPe: null, moonAp: null };
             let minMoonDist = Infinity; encounterMarker = null;
             
             let pathBase = []; let pathPlanned = [];
             let inManeuver = false;
 
             for (let i = 0; i < steps; i++) { 
-                
                 if (maneuver.active && !inManeuver) {
                     let dToNodeSq = Math.pow(px - maneuver.x, 2) + Math.pow(py - maneuver.y, 2);
                     if (dToNodeSq < 2000000) { 
@@ -616,17 +643,29 @@
                     }
                 }
 
-                if(i % stepResolution === 0) { let pt = {x: px, y: py}; if(!inManeuver) pathBase.push(pt); else pathPlanned.push(pt); }
-                
                 let r2 = px*px + py*py; let r = Math.sqrt(r2);
-                if(r < minR) { minR = r; orbitMarkers.pe = {x: px, y: py}; }
-                if(r > maxR) { maxR = r; orbitMarkers.ap = {x: px, y: py}; }
-                if (r < PLANET_RADIUS) { if(!inManeuver) pathBase.push({x:px,y:py}); else pathPlanned.push({x:px,y:py}); break; }
-                
                 let p_moonAngle = moonAngle + (i * moonSpeed); 
                 let mx = Math.sin(p_moonAngle) * MOON_DIST; let my = -Math.cos(p_moonAngle) * MOON_DIST;
                 let dxM = mx - px, dyM = my - py; let r2M = dxM*dxM + dyM*dyM; let rM = Math.sqrt(r2M);
+
+                // FIX: Log True Patched Conic Position
+                if(i % stepResolution === 0) { 
+                    let pt = {x: px, y: py, inSOI: false}; 
+                    if (rM < MOON_SOI) {
+                        pt.inSOI = true; pt.relX = px - mx; pt.relY = py - my;
+                    }
+                    if(!inManeuver) pathBase.push(pt); else pathPlanned.push(pt); 
+                }
                 
+                if (rM < MOON_SOI) {
+                    if(rM < minMoonR) { minMoonR = rM; orbitMarkers.moonPe = {x: px, y: py, relX: px - mx, relY: py - my, inSOI: true}; }
+                    if(rM > maxMoonR) { maxMoonR = rM; orbitMarkers.moonAp = {x: px, y: py, relX: px - mx, relY: py - my, inSOI: true}; }
+                } else {
+                    if(r < minR) { minR = r; orbitMarkers.pe = {x: px, y: py, inSOI: false}; }
+                    if(r > maxR) { maxR = r; orbitMarkers.ap = {x: px, y: py, inSOI: false}; }
+                }
+
+                if (r < PLANET_RADIUS) { if(!inManeuver) pathBase.push({x:px,y:py}); else pathPlanned.push({x:px,y:py}); break; }
                 if (rM < minMoonDist) { minMoonDist = rM; encounterMarker = {x: px, y: py, moonX: mx, moonY: my, dist: rM}; }
                 if (rM < MOON_RADIUS) { if(!inManeuver) pathBase.push({x:px,y:py}); else pathPlanned.push({x:px,y:py}); break; } 
                 
@@ -643,15 +682,47 @@
                 if (r > PLANET_RADIUS * 12) break; 
                 
                 if (!forceFull && i > 1000) {
-                    let anchorX = inManeuver ? maneuver.x : activeBody.position.x;
-                    let anchorY = inManeuver ? maneuver.y : activeBody.position.y;
-                    if (Math.pow(px - anchorX, 2) + Math.pow(py - anchorY, 2) < 4000000 && rM > MOON_SOI) {
+                    let anchorX = inManeuver ? maneuver.x : activeBody.position.x; let anchorY = inManeuver ? maneuver.y : activeBody.position.y;
+                    let stepsSince = inManeuver ? (i - maneuver.stepIndex) : i;
+                    if (stepsSince > 1000 && Math.pow(px - anchorX, 2) + Math.pow(py - anchorY, 2) < 4000000 && rM > MOON_SOI) {
                         if(!inManeuver) pathBase.push({ x: px, y: py }); else pathPlanned.push({ x: px, y: py }); 
                         break;
                     }
                 }
             }
             return { base: pathBase, planned: pathPlanned };
+        }
+
+        function drawPatchedConic(ctx, pathArray, defaultColor, soiColor, isDashed, bounds, scaleX, scaleY) {
+            if (pathArray.length < 2) return;
+            ctx.lineWidth = 3; if (isDashed) ctx.setLineDash([10, 10]); else ctx.setLineDash([]);
+            
+            let inSOI = pathArray[0].inSOI;
+            ctx.strokeStyle = inSOI ? soiColor : defaultColor;
+            ctx.beginPath();
+            
+            pathArray.forEach((p, i) => {
+                let drawX = p.x; let drawY = p.y;
+                if (p.inSOI) { drawX = MOON_POS.x + p.relX; drawY = MOON_POS.y + p.relY; }
+                let sx = (drawX - bounds.min.x) * scaleX; let sy = (drawY - bounds.min.y) * scaleY;
+                
+                if (i === 0) { ctx.moveTo(sx, sy); } 
+                else {
+                    if (p.inSOI !== inSOI) {
+                        ctx.stroke(); inSOI = p.inSOI; ctx.strokeStyle = inSOI ? soiColor : defaultColor;
+                        ctx.beginPath(); ctx.moveTo(sx, sy);
+                    } else { ctx.lineTo(sx, sy); }
+                }
+            });
+            ctx.stroke(); ctx.setLineDash([]);
+        }
+
+        function drawMarker(ctx, marker, label, color, bounds, scaleX, scaleY) {
+            if (!marker) return;
+            let drawX = marker.x; let drawY = marker.y;
+            if (marker.inSOI) { drawX = MOON_POS.x + marker.relX; drawY = MOON_POS.y + marker.relY; }
+            let sx = (drawX - bounds.min.x) * scaleX; let sy = (drawY - bounds.min.y) * scaleY;
+            ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fill(); ctx.fillText(label, sx + 10, sy);
         }
 
         // --- 7. CUSTOM GRAPHICS ---
@@ -667,11 +738,9 @@
                 if(ship) {
                     let dx = PLANET_POS.x - ship.position.x; let dy = PLANET_POS.y - ship.position.y;
                     let angle = Math.atan2(dy, dx); 
-                    
                     ctx.save();
                     let sX = (ship.position.x - bounds.min.x) * scaleX; let sY = (ship.position.y - bounds.min.y) * scaleY;
                     ctx.translate(sX, sY); ctx.rotate(angle - Math.PI/2); 
-                    
                     let distToSurface = (Math.sqrt(dx*dx + dy*dy) - PLANET_RADIUS) * scaleX;
                     ctx.fillStyle = '#0a1410'; ctx.fillRect(-window.innerWidth*2, distToSurface, window.innerWidth*4, window.innerHeight*4);
                     ctx.strokeStyle = '#122e20'; ctx.lineWidth = Math.max(5, 20 * scaleY);
@@ -693,18 +762,15 @@
             if (isMapView) {
                 let paths = getPredictivePath();
                 
-                if (paths.base.length > 1) {
-                    ctx.beginPath(); ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 3;
-                    paths.base.forEach((p, i) => { let sx = (p.x - bounds.min.x) * scaleX, sy = (p.y - bounds.min.y) * scaleY; if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy); }); ctx.stroke();
-                }
-                if (maneuver.active && paths.planned.length > 1) {
-                    ctx.beginPath(); ctx.strokeStyle = '#eab308'; ctx.lineWidth = 3; ctx.setLineDash([10, 10]);
-                    paths.planned.forEach((p, i) => { let sx = (p.x - bounds.min.x) * scaleX, sy = (p.y - bounds.min.y) * scaleY; if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy); }); ctx.stroke(); ctx.setLineDash([]);
-                }
+                // FIX: Draw Patched Conics
+                drawPatchedConic(ctx, paths.base, '#00f2ff', '#a855f7', false, bounds, scaleX, scaleY);
+                if (maneuver.active) drawPatchedConic(ctx, paths.planned, '#eab308', '#ec4899', true, bounds, scaleX, scaleY);
                 
-                ctx.fillStyle = '#eab308'; ctx.font = "bold 14px monospace";
-                if(orbitMarkers.pe && !maneuver.active) { let sx = (orbitMarkers.pe.x - bounds.min.x) * scaleX, sy = (orbitMarkers.pe.y - bounds.min.y) * scaleY; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fill(); ctx.fillText("Pe", sx + 10, sy); }
-                if(orbitMarkers.ap && !maneuver.active) { let sx = (orbitMarkers.ap.x - bounds.min.x) * scaleX, sy = (orbitMarkers.ap.y - bounds.min.y) * scaleY; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fill(); ctx.fillText("Ap", sx + 10, sy); }
+                ctx.font = "bold 14px monospace";
+                if (!maneuver.active) {
+                    drawMarker(ctx, orbitMarkers.pe, "Pe", '#eab308', bounds, scaleX, scaleY); drawMarker(ctx, orbitMarkers.ap, "Ap", '#eab308', bounds, scaleX, scaleY);
+                    drawMarker(ctx, orbitMarkers.moonPe, "Pe", '#a855f7', bounds, scaleX, scaleY); drawMarker(ctx, orbitMarkers.moonAp, "Ap", '#a855f7', bounds, scaleX, scaleY);
+                }
                 
                 if (maneuver.active && maneuver.x !== 0) {
                     let sx = (maneuver.x - bounds.min.x) * scaleX, sy = (maneuver.y - bounds.min.y) * scaleY;
@@ -714,7 +780,6 @@
                 if (encounterMarker && encounterMarker.dist < MOON_SOI * 1.5) {
                     let sx = (encounterMarker.x - bounds.min.x) * scaleX, sy = (encounterMarker.y - bounds.min.y) * scaleY;
                     ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.fillText("CA", sx + 10, sy);
-                    
                     let msx = (encounterMarker.moonX - bounds.min.x) * scaleX; let msy = (encounterMarker.moonY - bounds.min.y) * scaleY;
                     ctx.beginPath(); ctx.arc(msx, msy, MOON_RADIUS * scaleX, 0, Math.PI*2); ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)'; ctx.lineWidth = 2; ctx.stroke();
                 }
@@ -723,9 +788,9 @@
 
             shipBodies.forEach((body, idx) => {
                 let isMain = (idx === activeShipIndex);
-                if(isMapView && isMain) {
+                if(isMapView && isMain && cameraTarget !== 'ship') {
                     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); let sx = (body.position.x - bounds.min.x) * scaleX, sy = (body.position.y - bounds.min.y) * scaleY; ctx.translate(sx, sy); ctx.rotate(body.angle); ctx.fillStyle = '#00ffcc'; ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(10, 10); ctx.lineTo(-10, 10); ctx.closePath(); ctx.fill(); ctx.restore(); return; 
-                } else if (isMapView) return;
+                } else if (isMapView && cameraTarget !== 'ship') return;
 
                 body.parts.forEach((sub, i) => {
                     if (i === 0 && body.parts.length > 1) return; let d = sub.partData; if(!d) return;
