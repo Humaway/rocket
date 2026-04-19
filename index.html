@@ -313,14 +313,13 @@
             engine = Engine.create({ positionIterations: 16, velocityIterations: 16 }); engine.gravity.scale = 0; 
             render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }});
             
-            // FIX: Earth surface placed correctly so ship spawns seamlessly
-            dynamicSurface = Bodies.rectangle(0, PLANET_RADIUS - 50, 10000, 100, { isStatic: true, friction: 0.8 });
-            let pad = Bodies.rectangle(0, -PLANET_RADIUS - 20, 2000, 40, { isStatic: true, friction: 1, render: { visible: false }});
-
+            // FIX: Guaranteed safe collision-free spawn height
+            dynamicSurface = Bodies.rectangle(0, -PLANET_RADIUS + 100, 10000, 200, { isStatic: true, friction: 0.8 });
+            
             MOON_POS = {x: Math.sin(moonAngle) * MOON_DIST, y: -Math.cos(moonAngle) * MOON_DIST};
             moonBody = Bodies.circle(MOON_POS.x, MOON_POS.y, MOON_RADIUS, { isStatic: true, friction: 1, render: { visible: false } });
             
-            Composite.add(engine.world, [dynamicSurface, pad, moonBody]);
+            Composite.add(engine.world, [dynamicSurface, moonBody]);
 
             rawShipData = [];
             for(let r=0; r<ROWS; r++) {
@@ -336,8 +335,8 @@
             shipBodies = []; let masterBody = createCompoundBodyFromData(rawShipData, {x: 0, y: 0});
             let shipHeight = masterBody.bounds.max.y - masterBody.bounds.min.y;
             
-            // FIX: Ship positioned exactly resting on the pad
-            Body.setPosition(masterBody, {x: 0, y: -PLANET_RADIUS - 40 - shipHeight/2 - 10});
+            // Spawn 2 pixels safely above the surface to drop flawlessly.
+            Body.setPosition(masterBody, {x: 0, y: -PLANET_RADIUS - shipHeight/2 - 2});
             
             shipBodies.push(masterBody); activeShipIndex = 0;
 
@@ -541,7 +540,6 @@
             let activeBody = shipBodies[activeShipIndex]; if (!activeBody) return;
 
             let angleToShip = Math.atan2(activeBody.position.y - PLANET_POS.y, activeBody.position.x - PLANET_POS.x);
-            // FIX: Reposition dynamic surface to prevent inside-planet spawning
             Body.setPosition(dynamicSurface, { x: PLANET_POS.x + Math.cos(angleToShip) * (PLANET_RADIUS - 50), y: PLANET_POS.y + Math.sin(angleToShip) * (PLANET_RADIUS - 50) });
             Body.setAngle(dynamicSurface, angleToShip + Math.PI/2); 
 
@@ -787,6 +785,36 @@
             ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fill(); ctx.fillText(label, sx + 10, sy);
         }
 
+        function updateNavBall() {
+            let activeBody = shipBodies[activeShipIndex];
+            if (!activeBody) return;
+            
+            let pitch = (activeBody.angle * (180/Math.PI)) % 360;
+            if (pitch < 0) pitch += 360;
+            document.getElementById('nav-pitch').innerText = Math.round(pitch) + '°';
+
+            if (maneuver.active) {
+                document.getElementById('nav-target-row').style.display = 'flex'; 
+                document.getElementById('nav-dist-row').style.display = 'flex';
+                document.getElementById('nav-burn-row').style.display = 'flex';
+                
+                let tPitch = (maneuver.targetAngle * (180/Math.PI)) % 360; 
+                if (tPitch < 0) tPitch += 360;
+                document.getElementById('nav-target').innerText = Math.round(tPitch) + '°';
+                
+                let nX = maneuver.inSOI ? MOON_POS.x + maneuver.relX : maneuver.x;
+                let nY = maneuver.inSOI ? MOON_POS.y + maneuver.relY : maneuver.y;
+                let dist = Math.sqrt(Math.pow(activeBody.position.x - nX, 2) + Math.pow(activeBody.position.y - nY, 2));
+                document.getElementById('nav-dist').innerText = (dist / 100).toFixed(1) + ' km';
+                
+                document.getElementById('nav-burn').innerText = Math.abs(maneuver.dv).toFixed(1) + ' m/s';
+            } else { 
+                document.getElementById('nav-target-row').style.display = 'none'; 
+                document.getElementById('nav-dist-row').style.display = 'none'; 
+                document.getElementById('nav-burn-row').style.display = 'none';
+            }
+        }
+
         // --- 7. CUSTOM GRAPHICS ---
         function customRender() {
             if (mode !== 'flight') return;
@@ -818,8 +846,7 @@
             let mScreenX = (MOON_POS.x - bounds.min.x) * scaleX; let mScreenY = (MOON_POS.y - bounds.min.y) * scaleY; let mScreenRadius = MOON_RADIUS * scaleX;
             ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(mScreenX, mScreenY, mScreenRadius, 0, 2*Math.PI); ctx.fill(); ctx.lineWidth = Math.max(1, 5*scaleX); ctx.strokeStyle = '#334155'; ctx.stroke();
 
-            // VISUAL LAUNCHPAD (Fixed alignment)
-            let padTopY = (-PLANET_RADIUS - 40 - bounds.min.y) * scaleY;
+            let padTopY = (-PLANET_RADIUS - 20 - bounds.min.y) * scaleY;
             if (padTopY > 0 && padTopY < window.innerHeight) { ctx.fillStyle = '#333b4d'; ctx.fillRect((0 - 1000 - bounds.min.x)*scaleX, padTopY, 2000*scaleX, 40*scaleY); }
 
             if (isMapView) {
@@ -892,4 +919,4 @@
         }
     </script>
 </body>
-</html>
+</html> 
