@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Simulator V6.2 - The Lunar Landing Update</title>
+    <title>Orbital Simulator V6.3 - Stable Launchpad Fix</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; }
@@ -150,7 +150,7 @@
     </div>
 
     <script>
-        // --- 1. PART DATABASE (FIX: NERFED HEAVY, INCREASED DRAIN) ---
+        // --- 1. PART DATABASE ---
         const PART_DATA = {
             'pod': { mass: 1.0, fuel: 0, thrust: 0, w: 40, h: 48, type: 'pod' },
             'parachute': { mass: 0.1, fuel: 0, thrust: 0, w: 30, h: 20, type: 'parachute' },
@@ -313,11 +313,14 @@
             engine = Engine.create({ positionIterations: 16, velocityIterations: 16 }); engine.gravity.scale = 0; 
             render = Render.create({ element: document.body, engine: engine, options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: '#02040a' }});
             
-            dynamicSurface = Bodies.rectangle(0, PLANET_RADIUS + 50, 10000, 100, { isStatic: true, friction: 0.8 });
+            // FIX: Earth surface placed correctly so ship spawns seamlessly
+            dynamicSurface = Bodies.rectangle(0, PLANET_RADIUS - 50, 10000, 100, { isStatic: true, friction: 0.8 });
+            let pad = Bodies.rectangle(0, -PLANET_RADIUS - 20, 2000, 40, { isStatic: true, friction: 1, render: { visible: false }});
+
             MOON_POS = {x: Math.sin(moonAngle) * MOON_DIST, y: -Math.cos(moonAngle) * MOON_DIST};
             moonBody = Bodies.circle(MOON_POS.x, MOON_POS.y, MOON_RADIUS, { isStatic: true, friction: 1, render: { visible: false } });
             
-            Composite.add(engine.world, [dynamicSurface, moonBody]);
+            Composite.add(engine.world, [dynamicSurface, pad, moonBody]);
 
             rawShipData = [];
             for(let r=0; r<ROWS; r++) {
@@ -332,7 +335,9 @@
 
             shipBodies = []; let masterBody = createCompoundBodyFromData(rawShipData, {x: 0, y: 0});
             let shipHeight = masterBody.bounds.max.y - masterBody.bounds.min.y;
-            Body.setPosition(masterBody, {x: 0, y: -PLANET_RADIUS - shipHeight/2 - 20});
+            
+            // FIX: Ship positioned exactly resting on the pad
+            Body.setPosition(masterBody, {x: 0, y: -PLANET_RADIUS - 40 - shipHeight/2 - 10});
             
             shipBodies.push(masterBody); activeShipIndex = 0;
 
@@ -514,17 +519,15 @@
             flightLoopId = requestAnimationFrame(flightLoop);
             let steps = warpLevels[currentWarpIndex];
             
-            // Pre-loop velocity for delta-v tracking
             let activeBody = shipBodies[activeShipIndex];
             if(activeBody) { liveVelocityTracker.x = activeBody.velocity.x; liveVelocityTracker.y = activeBody.velocity.y; }
 
             for(let i=0; i<steps; i++) { gameLoop(); Engine.update(engine, 16.666); }
             
-            // FIX: True Live Delta-V Burn Sync
             if (activeBody && maneuver.active && maneuver.dv !== 0 && keys['KeyW']) {
                 let dx = activeBody.velocity.x - liveVelocityTracker.x;
                 let dy = activeBody.velocity.y - liveVelocityTracker.y;
-                let actualDv = Math.sqrt(dx*dx + dy*dy) * 10; // Match display speed multiplier
+                let actualDv = Math.sqrt(dx*dx + dy*dy) * 10; 
                 if (maneuver.dv > 0) maneuver.dv -= actualDv;
                 else maneuver.dv += actualDv;
                 if (Math.abs(maneuver.dv) < 1.0) clearNode();
@@ -538,10 +541,10 @@
             let activeBody = shipBodies[activeShipIndex]; if (!activeBody) return;
 
             let angleToShip = Math.atan2(activeBody.position.y - PLANET_POS.y, activeBody.position.x - PLANET_POS.x);
-            Body.setPosition(dynamicSurface, { x: PLANET_POS.x + Math.cos(angleToShip) * (PLANET_RADIUS + 50), y: PLANET_POS.y + Math.sin(angleToShip) * (PLANET_RADIUS + 50) });
+            // FIX: Reposition dynamic surface to prevent inside-planet spawning
+            Body.setPosition(dynamicSurface, { x: PLANET_POS.x + Math.cos(angleToShip) * (PLANET_RADIUS - 50), y: PLANET_POS.y + Math.sin(angleToShip) * (PLANET_RADIUS - 50) });
             Body.setAngle(dynamicSurface, angleToShip + Math.PI/2); 
 
-            // FIX: Track exact Moon velocity for relative physics
             let prevMoonX = MOON_POS.x, prevMoonY = MOON_POS.y;
             moonAngle += moonSpeed; 
             MOON_POS.x = Math.sin(moonAngle) * MOON_DIST; MOON_POS.y = -Math.cos(moonAngle) * MOON_DIST;
@@ -550,7 +553,6 @@
 
             let distToMoon = Math.sqrt(Math.pow(MOON_POS.x - activeBody.position.x, 2) + Math.pow(MOON_POS.y - activeBody.position.y, 2));
             
-            // FIX: Relative Velocity Calculation
             let relVelX = activeBody.velocity.x; let relVelY = activeBody.velocity.y;
             if (distToMoon < MOON_SOI) { relVelX -= moonVelX; relVelY -= moonVelY; }
 
@@ -577,7 +579,6 @@
 
                 if (isLaunched) {
                     if (dM < MOON_SOI && dM > MOON_RADIUS) { 
-                        // Perfectly stable lunar orbit: apply only Moon's gravity
                         Body.applyForce(body, body.position, {x: (dxM/dM)*(MOON_GRAVITY / d2M)*body.mass, y: (dyM/dM)*(MOON_GRAVITY / d2M)*body.mass}); 
                     } else if (d > PLANET_RADIUS) {
                         Body.applyForce(body, body.position, {x: (dx/d)*(GRAVITY_CONSTANT / d2)*body.mass, y: (dy/d)*(GRAVITY_CONSTANT / d2)*body.mass}); 
@@ -628,6 +629,7 @@
                 if (keys['KeyD'] || keys['ArrowRight']) Body.setAngularVelocity(activeBody, activeBody.angularVelocity + 0.0003);
             }
 
+            let dist = Vector.magnitude(activeBody.position); let alt = dist - PLANET_RADIUS;
             document.getElementById('tel-alt').innerText = ((distToMoon < MOON_SOI ? (distToMoon - MOON_RADIUS) : (dist - PLANET_RADIUS)) / 100).toFixed(1) + ' km';
             document.getElementById('tel-atmo').innerText = dist - PLANET_RADIUS < ATMOSPHERE_HEIGHT ? Math.floor((1 - (dist - PLANET_RADIUS)/ATMOSPHERE_HEIGHT)*100) + '%' : '0% (VAC)';
 
@@ -649,7 +651,6 @@
                 let viewSpan = (PLANET_RADIUS * 1.5) * mapZoom;
                 Render.lookAt(render, { min: { x: targetX - viewSpan, y: targetY - viewSpan }, max: { x: targetX + viewSpan, y: targetY + viewSpan } });
             } else {
-                let alt = dist - PLANET_RADIUS;
                 let zoom = 1 + (Math.max(0, alt) * 0.00005); zoom = Math.min(zoom, 5.0);
                 if (distToMoon < MOON_SOI) { zoom = 1 + (Math.max(0, distToMoon - MOON_RADIUS) * 0.0002); zoom = Math.min(zoom, 5.0); }
                 Render.lookAt(render, { min: { x: activeBody.position.x - (window.innerWidth/2)*zoom, y: activeBody.position.y - (window.innerHeight/2)*zoom }, max: { x: activeBody.position.x + (window.innerWidth/2)*zoom, y: activeBody.position.y + (window.innerHeight/2)*zoom } });
@@ -663,7 +664,6 @@
         function getPredictivePath(forceFull = false) {
             let activeBody = shipBodies[activeShipIndex]; if (!activeBody || !isLaunched) return { base: [], planned: [] };
             
-            // FIX: Optimization - Predict 4 ticks of time per calculation to extend range
             let timeStepMult = 4;
             let dt = 16.666 * timeStepMult;
             let dtSq = Math.pow(dt, 2); 
@@ -671,7 +671,7 @@
             let px = activeBody.position.x, py = activeBody.position.y;
             let px_prev = px - (activeBody.velocity.x * timeStepMult); let py_prev = py - (activeBody.velocity.y * timeStepMult);
             
-            let steps = 150000; let stepResolution = 20; // 150,000 * 4 = 600,000 standard ticks 
+            let steps = 150000; let stepResolution = 20; 
             
             let minR = Infinity, maxR = 0; let minMoonR = Infinity, maxMoonR = 0;
             orbitMarkers = { pe: null, ap: null, moonPe: null, moonAp: null };
@@ -787,36 +787,6 @@
             ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI*2); ctx.fill(); ctx.fillText(label, sx + 10, sy);
         }
 
-        function updateNavBall() {
-            let activeBody = shipBodies[activeShipIndex];
-            if (!activeBody) return;
-            
-            let pitch = (activeBody.angle * (180/Math.PI)) % 360;
-            if (pitch < 0) pitch += 360;
-            document.getElementById('nav-pitch').innerText = Math.round(pitch) + '°';
-
-            if (maneuver.active) {
-                document.getElementById('nav-target-row').style.display = 'flex'; 
-                document.getElementById('nav-dist-row').style.display = 'flex';
-                document.getElementById('nav-burn-row').style.display = 'flex';
-                
-                let tPitch = (maneuver.targetAngle * (180/Math.PI)) % 360; 
-                if (tPitch < 0) tPitch += 360;
-                document.getElementById('nav-target').innerText = Math.round(tPitch) + '°';
-                
-                let nX = maneuver.inSOI ? MOON_POS.x + maneuver.relX : maneuver.x;
-                let nY = maneuver.inSOI ? MOON_POS.y + maneuver.relY : maneuver.y;
-                let dist = Math.sqrt(Math.pow(activeBody.position.x - nX, 2) + Math.pow(activeBody.position.y - nY, 2));
-                document.getElementById('nav-dist').innerText = (dist / 100).toFixed(1) + ' km';
-                
-                document.getElementById('nav-burn').innerText = Math.abs(maneuver.dv).toFixed(1) + ' m/s';
-            } else { 
-                document.getElementById('nav-target-row').style.display = 'none'; 
-                document.getElementById('nav-dist-row').style.display = 'none'; 
-                document.getElementById('nav-burn-row').style.display = 'none';
-            }
-        }
-
         // --- 7. CUSTOM GRAPHICS ---
         function customRender() {
             if (mode !== 'flight') return;
@@ -848,7 +818,8 @@
             let mScreenX = (MOON_POS.x - bounds.min.x) * scaleX; let mScreenY = (MOON_POS.y - bounds.min.y) * scaleY; let mScreenRadius = MOON_RADIUS * scaleX;
             ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(mScreenX, mScreenY, mScreenRadius, 0, 2*Math.PI); ctx.fill(); ctx.lineWidth = Math.max(1, 5*scaleX); ctx.strokeStyle = '#334155'; ctx.stroke();
 
-            let padTopY = (-PLANET_RADIUS - 20 - bounds.min.y) * scaleY;
+            // VISUAL LAUNCHPAD (Fixed alignment)
+            let padTopY = (-PLANET_RADIUS - 40 - bounds.min.y) * scaleY;
             if (padTopY > 0 && padTopY < window.innerHeight) { ctx.fillStyle = '#333b4d'; ctx.fillRect((0 - 1000 - bounds.min.x)*scaleX, padTopY, 2000*scaleX, 40*scaleY); }
 
             if (isMapView) {
