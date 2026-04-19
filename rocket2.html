@@ -3,47 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Orbital Builder - Prototype</title>
+    <title>3D Orbital Builder & Flight - V2</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #030613; font-family: 'Segoe UI', Tahoma, sans-serif; color: white; user-select: none; touch-action: none; }
         #canvas-container { width: 100vw; height: 100vh; display: block; }
         
-        #ui-panel {
-            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            background: rgba(10, 15, 25, 0.9); border: 1px solid #334; border-radius: 12px;
-            padding: 15px; display: flex; gap: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.8);
-            pointer-events: auto; z-index: 10;
+        .panel {
+            position: absolute; background: rgba(10, 15, 25, 0.9); border: 1px solid #334;
+            border-radius: 12px; padding: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.8); z-index: 10;
         }
+
+        #build-ui { bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; }
+        #flight-ui { top: 20px; right: 20px; display: none; flex-direction: column; gap: 10px; width: 250px; font-family: monospace; }
         
-        .part-btn {
+        .btn {
             background: #1e293b; border: 2px solid #334; border-radius: 8px; padding: 10px 20px;
-            color: white; font-weight: bold; cursor: pointer; transition: 0.2s;
-            text-transform: uppercase; font-size: 0.8rem;
+            color: white; font-weight: bold; cursor: pointer; transition: 0.2s; text-transform: uppercase;
         }
-        .part-btn:hover { background: #334155; }
-        .part-btn.active { border-color: #00ffcc; background: rgba(0, 255, 204, 0.1); color: #00ffcc; }
-        
-        #instructions {
-            position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.7);
-            padding: 15px; border-radius: 8px; border: 1px solid #445; pointer-events: none;
-        }
+        .btn:hover { background: #334155; }
+        .btn.active { border-color: #00ffcc; background: rgba(0, 255, 204, 0.1); color: #00ffcc; }
+        .btn-launch { background: #10b981; border-color: #059669; }
+        .btn-launch:hover { background: #059669; }
+
+        #instructions { top: 20px; left: 20px; pointer-events: none; }
         h2 { margin: 0 0 5px 0; color: #00ffcc; font-size: 1.2rem; letter-spacing: 1px; }
         p { margin: 0; color: #8892b0; font-size: 0.85rem; line-height: 1.4; }
+
+        .telemetry { display: flex; justify-content: space-between; border-bottom: 1px solid #334; padding: 5px 0; }
+        .telemetry span:first-child { color: #8892b0; }
+        
+        #controls-help { display: none; bottom: 20px; left: 20px; color: #00ffcc; font-size: 0.8rem; pointer-events: none; }
     </style>
 </head>
 <body>
 
-    <div id="instructions">
+    <div id="instructions" class="panel">
         <h2>VAB 3D PROTOTYPE</h2>
-        <p>1. Select a part below.</p>
-        <p>2. Tap/Click to place on the pad or stack on parts.</p>
-        <p>3. Drag background to rotate camera.</p>
+        <p>1. Select parts and tap to stack.</p>
+        <p>2. Ensure you have an Engine at the bottom.</p>
+        <p>3. Click Launch to fly.</p>
     </div>
 
-    <div id="ui-panel">
-        <button class="part-btn" data-type="pod">Cmd Pod</button>
-        <button class="part-btn active" data-type="tank">Fuel Tank</button>
-        <button class="part-btn" data-type="engine">Engine</button>
+    <div id="controls-help" class="panel">
+        [SHIFT] Throttle Up | [CTRL] Throttle Down<br>
+        [W/S] Pitch | [A/D] Yaw | [Q/E] Roll
+    </div>
+
+    <div id="build-ui" class="panel">
+        <button class="btn active part-btn" data-type="pod">Cmd Pod</button>
+        <button class="btn part-btn" data-type="tank">Fuel Tank</button>
+        <button class="btn part-btn" data-type="engine">Engine</button>
+        <div style="width: 2px; background: #334; margin: 0 5px;"></div>
+        <button class="btn btn-launch" id="btn-launch">TO LAUNCHPAD</button>
+    </div>
+
+    <div id="flight-ui" class="panel">
+        <h2 style="color: #eab308; margin-bottom: 10px;">TELEMETRY</h2>
+        <div class="telemetry"><span>ALTITUDE</span><span id="tel-alt">0 m</span></div>
+        <div class="telemetry"><span>VELOCITY</span><span id="tel-vel">0 m/s</span></div>
+        <div class="telemetry"><span>THROTTLE</span><span id="tel-thr" style="color: #ef4444;">0%</span></div>
     </div>
 
     <div id="canvas-container"></div>
@@ -61,95 +79,88 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        // --- 1. SCENE SETUP ---
-        const container = document.getElementById('canvas-container');
+        // --- 1. CORE SETUP ---
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x030613, 0.02);
+        scene.background = new THREE.Color(0x02040a);
+        scene.fog = new THREE.FogExp2(0x02040a, 0.015);
 
-        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(15, 10, 15);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
+        camera.position.set(20, 15, 20);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        container.appendChild(renderer.domElement);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.maxPolarAngle = Math.PI / 2 - 0.05; // Prevent camera going below ground
+        controls.maxPolarAngle = Math.PI / 2 - 0.05;
 
-        // --- 2. LIGHTING ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-        scene.add(ambientLight);
+        // Lighting
+        scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+        const sun = new THREE.DirectionalLight(0xfffaed, 2.0);
+        sun.position.set(50, 100, 50);
+        sun.castShadow = true;
+        sun.shadow.camera.near = 0.5;
+        sun.shadow.camera.far = 500;
+        sun.shadow.camera.left = -50;
+        sun.shadow.camera.right = 50;
+        sun.shadow.camera.top = 50;
+        sun.shadow.camera.bottom = -50;
+        sun.shadow.mapSize.width = 2048;
+        sun.shadow.mapSize.height = 2048;
+        scene.add(sun);
 
-        const dirLight = new THREE.DirectionalLight(0xfffaed, 2.0);
-        dirLight.position.set(10, 20, 10);
-        dirLight.castShadow = true;
-        dirLight.shadow.mapSize.width = 2048;
-        dirLight.shadow.mapSize.height = 2048;
-        scene.add(dirLight);
+        // Environment
+        const groundGeo = new THREE.PlaneGeometry(2000, 2000);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 1 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
 
-        // --- 3. ENVIRONMENT & BUILD LOGIC ---
-        const buildableObjects = []; // Array for Raycaster to check against
-
-        // Launchpad
-        const padGeo = new THREE.CylinderGeometry(8, 8, 1, 32);
-        const padMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8 });
-        const pad = new THREE.Mesh(padGeo, padMat);
-        pad.position.y = -0.5;
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 1, 32), new THREE.MeshStandardMaterial({ color: 0x334155 }));
+        pad.position.y = 0.5;
         pad.receiveShadow = true;
         pad.userData.isPad = true;
         scene.add(pad);
-        buildableObjects.push(pad);
 
-        // Grid Helper
-        const grid = new THREE.GridHelper(20, 20, 0x445566, 0x223344);
-        grid.position.y = 0.01;
-        scene.add(grid);
+        // --- 2. BUILD SYSTEM ---
+        const buildableObjects = [pad];
+        const builtParts = []; // Keep track of all placed parts
 
-        // --- 4. PART DICTIONARY ---
         const parts = {
-            'pod': { geo: new THREE.ConeGeometry(1, 1.5, 16), color: 0xe2e8f0, height: 1.5 },
-            'tank': { geo: new THREE.CylinderGeometry(1.2, 1.2, 3, 16), color: 0xcbd5e1, height: 3 },
-            'engine': { geo: new THREE.CylinderGeometry(0.8, 1.2, 1.5, 16), color: 0x475569, height: 1.5 }
+            'pod': { geo: new THREE.ConeGeometry(1, 1.5, 16), color: 0xe2e8f0, height: 1.5, mass: 1 },
+            'tank': { geo: new THREE.CylinderGeometry(1.2, 1.2, 3, 16), color: 0xcbd5e1, height: 3, mass: 4 },
+            'engine': { geo: new THREE.CylinderGeometry(0.8, 1.2, 1.5, 16), color: 0x475569, height: 1.5, mass: 2 }
         };
 
-        let currentPartType = 'tank';
-
-        // --- 5. GHOST MESH (Placement Indicator) ---
-        const ghostMat = new THREE.MeshStandardMaterial({ 
-            color: 0x00ffcc, transparent: true, opacity: 0.4, depthWrite: false 
-        });
-        let ghostMesh = new THREE.Mesh(parts[currentPartType].geo, ghostMat);
+        let currentPartType = 'pod';
+        const ghostMesh = new THREE.Mesh(parts[currentPartType].geo, new THREE.MeshStandardMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.4, depthWrite: false }));
         scene.add(ghostMesh);
 
-        // --- 6. RAYCASTING & INTERACTION ---
         const raycaster = new THREE.Raycaster();
         const pointer = new THREE.Vector2();
         let isDraggingCamera = false;
+        let appState = 'build'; // 'build' or 'flight'
 
-        // UI Event Listeners
+        // UI Listeners
         document.querySelectorAll('.part-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 document.querySelectorAll('.part-btn').forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
                 currentPartType = e.target.dataset.type;
-                
-                // Update ghost geometry
                 ghostMesh.geometry = parts[currentPartType].geo;
             });
         });
 
-        // Track if orbit controls are moving to prevent accidental part placement
         controls.addEventListener('start', () => isDraggingCamera = false);
         controls.addEventListener('change', () => isDraggingCamera = true);
 
-        // Update Ghost Position on Move
-        window.addEventListener('pointermove', (event) => {
-            // Convert pointer position to normalized device coordinates
-            pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
-            pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        window.addEventListener('pointermove', (e) => {
+            if (appState !== 'build') return;
+            pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
             raycaster.setFromCamera(pointer, camera);
             const intersects = raycaster.intersectObjects(buildableObjects);
@@ -157,89 +168,173 @@
             if (intersects.length > 0) {
                 ghostMesh.visible = true;
                 const hit = intersects[0];
-                const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
                 const partHeight = parts[currentPartType].height;
 
-                // Stacking logic
-                if (hit.object.userData.isRocketPart) {
-                    // Align X and Z to stack perfectly straight
-                    ghostMesh.position.x = hit.object.position.x;
-                    ghostMesh.position.z = hit.object.position.z;
-
-                    const hitHeight = hit.object.userData.height;
-                    
-                    // Attach to top or bottom based on normal
-                    if (normal.y > 0.5) {
-                        ghostMesh.position.y = hit.object.position.y + (hitHeight / 2) + (partHeight / 2);
-                    } else if (normal.y < -0.5) {
-                        ghostMesh.position.y = hit.object.position.y - (hitHeight / 2) - (partHeight / 2);
-                    } else {
-                        ghostMesh.visible = false; // Disable side-attachment for now
-                    }
+                if (hit.object.userData.isRocketPart && hit.face.normal.y > 0.5) {
+                    ghostMesh.position.set(hit.object.position.x, hit.object.position.y + (hit.object.userData.height / 2) + (partHeight / 2), hit.object.position.z);
                 } else if (hit.object.userData.isPad) {
-                    // Building on the ground
-                    ghostMesh.position.copy(hit.point);
-                    ghostMesh.position.y = partHeight / 2;
+                    ghostMesh.position.set(hit.point.x, 1 + partHeight / 2, hit.point.z);
+                } else {
+                    ghostMesh.visible = false;
                 }
-            } else {
-                ghostMesh.visible = false;
-            }
+            } else { ghostMesh.visible = false; }
         });
 
-        // Place Part on Up/Click
-        window.addEventListener('pointerup', (event) => {
-            // Ignore if we were rotating the camera or clicked UI
-            if (isDraggingCamera || event.target.tagName === 'BUTTON') return;
+        window.addEventListener('pointerup', (e) => {
+            if (appState !== 'build' || isDraggingCamera || e.target.tagName === 'BUTTON') return;
 
             if (ghostMesh.visible) {
-                const partData = parts[currentPartType];
-                const newMat = new THREE.MeshStandardMaterial({ 
-                    color: partData.color, 
-                    roughness: 0.5, 
-                    metalness: 0.2 
-                });
+                const pData = parts[currentPartType];
+                const mesh = new THREE.Mesh(pData.geo, new THREE.MeshStandardMaterial({ color: pData.color, roughness: 0.5 }));
+                mesh.position.copy(ghostMesh.position);
+                mesh.castShadow = true; mesh.receiveShadow = true;
+                mesh.userData = { isRocketPart: true, type: currentPartType, height: pData.height, mass: pData.mass };
                 
-                const newPart = new THREE.Mesh(partData.geo, newMat);
-                newPart.position.copy(ghostMesh.position);
-                newPart.castShadow = true;
-                newPart.receiveShadow = true;
-                
-                // Tag it so the raycaster knows how to interact with it
-                newPart.userData = { 
-                    isRocketPart: true, 
-                    type: currentPartType, 
-                    height: partData.height 
-                };
-                
-                scene.add(newPart);
-                buildableObjects.push(newPart);
-                
-                // Add a little pop animation effect
-                newPart.scale.set(0.1, 0.1, 0.1);
-                let scale = 0.1;
-                const animatePop = () => {
-                    scale += (1.0 - scale) * 0.2;
-                    newPart.scale.set(scale, scale, scale);
-                    if (scale < 0.99) requestAnimationFrame(animatePop);
-                    else newPart.scale.set(1, 1, 1);
-                };
-                animatePop();
+                scene.add(mesh);
+                buildableObjects.push(mesh);
+                builtParts.push(mesh);
             }
         });
 
-        // Handle Resize
+        // --- 3. FLIGHT PHYSICS SYSTEM ---
+        let rocketRigidBody = new THREE.Group();
+        let velocity = new THREE.Vector3(0, 0, 0);
+        let angularVelocity = new THREE.Vector3(0, 0, 0);
+        let throttle = 0;
+        const gravity = new THREE.Vector3(0, -9.81, 0);
+        
+        let enginePlumes = [];
+
+        document.getElementById('btn-launch').addEventListener('click', () => {
+            if (builtParts.length === 0) return alert("Build a rocket first!");
+            
+            appState = 'flight';
+            document.getElementById('build-ui').style.display = 'none';
+            document.getElementById('instructions').style.display = 'none';
+            document.getElementById('flight-ui').style.display = 'flex';
+            document.getElementById('controls-help').style.display = 'block';
+            ghostMesh.visible = false;
+
+            // 1. Group all parts into a single Rigid Body
+            scene.add(rocketRigidBody);
+            
+            // Find center of mass (simplified to bounding box center)
+            const box = new THREE.Box3();
+            builtParts.forEach(p => box.expandByObject(p));
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+
+            // Move group to center, reparent parts, adjust offsets
+            rocketRigidBody.position.copy(center);
+            builtParts.forEach(p => {
+                const localPos = p.position.clone().sub(center);
+                p.position.copy(localPos);
+                rocketRigidBody.add(p);
+
+                // Add visual exhaust plume to engines
+                if (p.userData.type === 'engine') {
+                    const plumeGeo = new THREE.ConeGeometry(0.6, 2, 8);
+                    const plumeMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.8 });
+                    const plume = new THREE.Mesh(plumeGeo, plumeMat);
+                    plume.position.y = -p.userData.height / 2 - 1; // Below the engine
+                    plume.rotation.x = Math.PI; // Point down
+                    plume.visible = false;
+                    p.add(plume);
+                    enginePlumes.push(plume);
+                }
+            });
+
+            // Re-center camera on rocket
+            controls.target = rocketRigidBody.position;
+            controls.maxPolarAngle = Math.PI; // Allow looking from underneath in flight
+        });
+
+        // --- 4. FLIGHT CONTROLS ---
+        const keys = { w: false, a: false, s: false, d: false, q: false, e: false, shift: false, ctrl: false };
+        
+        window.addEventListener('keydown', (e) => {
+            const k = e.key.toLowerCase();
+            if (keys.hasOwnProperty(k)) keys[k] = true;
+            if (e.key === 'Shift') keys.shift = true;
+            if (e.key === 'Control') keys.ctrl = true;
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            const k = e.key.toLowerCase();
+            if (keys.hasOwnProperty(k)) keys[k] = false;
+            if (e.key === 'Shift') keys.shift = false;
+            if (e.key === 'Control') keys.ctrl = false;
+        });
+
+        // --- 5. MAIN LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.1); // Cap delta time to prevent physics explosions
+
+            if (appState === 'flight') {
+                // Throttle control
+                if (keys.shift) throttle = Math.min(100, throttle + 50 * dt);
+                if (keys.ctrl) throttle = Math.max(0, throttle - 50 * dt);
+                document.getElementById('tel-thr').innerText = Math.round(throttle) + '%';
+
+                // Calculate Thrust Vector (Local Y axis)
+                const thrustPower = (throttle / 100) * 30; // Max thrust acceleration
+                const thrustVector = new THREE.Vector3(0, 1, 0);
+                thrustVector.applyQuaternion(rocketRigidBody.quaternion); // Point thrust in direction rocket is facing
+                thrustVector.multiplyScalar(thrustPower);
+
+                // Apply Physics (Euler Integration)
+                const acceleration = new THREE.Vector3().copy(gravity).add(thrustVector);
+                velocity.add(acceleration.clone().multiplyScalar(dt));
+                rocketRigidBody.position.add(velocity.clone().multiplyScalar(dt));
+
+                // Steering (Attitude Control)
+                const turnSpeed = 1.5 * dt;
+                if (keys.w) rocketRigidBody.rotateX(turnSpeed);
+                if (keys.s) rocketRigidBody.rotateX(-turnSpeed);
+                if (keys.a) rocketRigidBody.rotateZ(turnSpeed);
+                if (keys.d) rocketRigidBody.rotateZ(-turnSpeed);
+                if (keys.q) rocketRigidBody.rotateY(turnSpeed);
+                if (keys.e) rocketRigidBody.rotateY(-turnSpeed);
+
+                // Ground Collision (simplified point collision at center of mass)
+                // Realistically you'd raycast downward from the lowest part
+                if (rocketRigidBody.position.y < 1.5) {
+                    rocketRigidBody.position.y = 1.5;
+                    velocity.y = Math.max(0, velocity.y); // Stop downward movement, allow upward
+                    velocity.x *= 0.95; // Friction
+                    velocity.z *= 0.95;
+                }
+
+                // Visual Engine Plumes
+                enginePlumes.forEach(plume => {
+                    plume.visible = throttle > 0;
+                    if (plume.visible) {
+                        plume.scale.set(1 + Math.random()*0.2, (throttle/100) + Math.random()*0.2, 1 + Math.random()*0.2);
+                        plume.material.color.setHex(throttle > 80 ? 0x00ffff : 0xffaa00);
+                    }
+                });
+
+                // Update Camera to follow rocket
+                controls.target.copy(rocketRigidBody.position);
+                
+                // Telemetry Updates
+                document.getElementById('tel-alt').innerText = Math.max(0, Math.round(rocketRigidBody.position.y - 1.5)) + ' m';
+                document.getElementById('tel-vel').innerText = Math.round(velocity.length()) + ' m/s';
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // Animation Loop
-        function animate() {
-            requestAnimationFrame(animate);
-            controls.update();
-            renderer.render(scene, camera);
-        }
         animate();
     </script>
 </body>
